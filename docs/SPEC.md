@@ -8,16 +8,17 @@
 **Задача этапа:** сайт, на котором можно создать комнату, другие игроки присоединяются к ней, движения всех персонажей синхронизируются через бэкенд и сохраняются в БД. Всё работает на **одном хосте** в локальной сети без интернета.
 
 **Входит:**
-- лобби: имя, создание комнаты, вход по коду / из списка / по ссылке;
+- лобби: имя → токен (auth), создание комнаты (с тоглом публичности) через RoomManager, вход по коду / из списка / по ссылке;
 - HTTP API на Fastify: auth (имя → JWT), RoomManager (POST/DELETE /room, роли мастер/гость), отладочные ручки;
 - UDP-бродкаст публичных комнат в LAN (`node:dgram`) и hello-канал `WS /room/{id}/connect` (событие «Hello world!» раз в секунду);
 - комната-экипаж на Colyseus: синхронизация движения, чат, переподключение;
-- SQLite: игроки, сессии, позиции, журнал событий;
-- 2.5D-сцена хаба на three.js с физикой платформера;
+- игра: корабль (хаб) → 5 эпох → в каждой головоломка на двоих (Наблюдатель + Механик) → деталь → возврат на корабль; станции, бортовой ИИ с подсказками, финал. Все состояния головоломок — только на сервере, клиент получает вид своей роли;
+- SQLite: игроки, сессии, прогресс (эпоха/детали/роли), журнал событий;
+- 2.5D-сцена на three.js: миры эпох (worlds/*), физика платформера из shared (`physics.ts`), NPC и декор эпох;
 - кнопка «Скопировать приглашение» со ссылкой на LAN-IP хоста;
-- заготовка под ИИ-агентов (без LLM).
+- заготовка под ИИ-агентов (реплики без LLM).
 
-**Не входит (следующие этапы):** головоломки, предметы, роли, эпохи, логин с паролем, ИИ-персонажи, ассеты.
+**Не входит (следующие этапы):** предметы-инвентарь, логин с паролем, ИИ-персонажи на LLM, ассеты.
 
 ## 2. Технологии и почему
 
@@ -64,31 +65,35 @@ shared/src/
   level.ts       описание уровня (хаб), цвет игрока по имени
 server/src/
   index.ts            бутстрап: один http.Server (Fastify) + Colyseus + hello-hub + UDP-beacon
-  config.ts           порт, хост, БД, JWT, UDP, Ollama (env)
+  config.ts           порт, хост, БД, JWT, UDP, solo-режим, Ollama (env)
   http/app.ts         Fastify-приложение: все HTTP-роуты + статика + SPA-fallback
   auth/tokens.ts      JWT (jose): выпуск, проверка, blacklist по jti
-  rooms/CrewRoom.ts   жизненный цикл комнаты
+  rooms/CrewRoom.ts   жизненный цикл комнаты + эпохи/роли/головоломки
   rooms/movement.ts   серверная проверка пакетов движения
   rooms/roomManager.ts REST-обёртка над комнатами: мастер/гость, публичность (in-memory Map)
+  puzzles/            5 головоломок: чистые state-machine (Puzzle.ts + factory + тесты)
+  agents/             AgentService, реплики рассказчиков и бортового ИИ, nextLine-память
   net/udpBeacon.ts    UDP-бродкаст публичных комнат
   net/helloHub.ts     WS-канал /room/{id}/connect, «Hello world!» 1 Гц
   net/lan.ts          LAN IPv4-адреса хоста (ранжирование интерфейсов)
   db/db.ts            открытие БД + миграции по PRAGMA user_version
-  db/repositories.ts  prepared statements: players, sessions, playerState, eventsLog
+  db/repositories.ts  prepared statements: players, sessions (+setProgress), playerState (+roles), eventsLog
   core/eventBus.ts    внутренняя шина событий
-  agents/             AgentService (подписка на шину) + OllamaClient (выключен)
-server/scripts/smoke.ts       смоук-тест мультиплеера двумя клиентами
-server/scripts/udp-listen.ts  ручной слушатель UDP-бродкастов
+server/scripts/smoke.ts        смоук-тест мультиплеера двумя клиентами
+server/scripts/playthrough.ts  2 бота проходят все 5 эпох end-to-end
+server/scripts/udp-listen.ts   ручной слушатель UDP-бродкастов
 client/src/
-  main.ts              переходы лобби ↔ игра
-  net/connection.ts    Colyseus SDK, REST-запросы
-  ui/lobby.ts          экран лобби
-  ui/hud.ts            HUD: код, статус сети, экипаж, чат, приглашение
-  ui/invite.ts         сборка ссылки-приглашения + копирование
-  game/Game.ts         сцена, игровой цикл, связь state → объекты сцены
-  game/world.ts        уровень, свет, слои фона
-  game/Character.ts    визуал персонажа (куб, глаза, табличка с именем)
-  game/LocalController.ts  ввод и физика своего игрока
+  main.ts             переходы лобби ↔ игра
+  net/connection.ts   Colyseus SDK, auth (токен в localStorage), POST /room, REST-запросы
+  ui/lobby.ts         экран лобби (имя → токен, публичность комнаты)
+  ui/hud.ts           HUD: код, статус сети, экипаж, чат, приглашение, эпоха/детали
+  ui/puzzles.ts       рендереры видов головоломок (по puzzleId × роли)
+  ui/puzzlePanel.ts   панель головоломки: подписка на state + puzzle.view, отправка действий
+  ui/invite.ts        сборка ссылки-приглашения + копирование
+  game/Game.ts        сцена, игровой цикл, смена миров по levelId, бейджи ролей
+  game/worlds/        общий каркас миров + декор 5 эпох + хаб (станции, NPC)
+  game/Character.ts   визуал персонажа (куб, глаза, табличка, иконка роли)
+  game/LocalController.ts  ввод и физика своего игрока (shared/physics.ts)
   game/RemotePlayer.ts     сглаживание чужих игроков
 ```
 
@@ -101,11 +106,15 @@ client/src/
 ### 5.1 Состояние
 
 ```ts
-CrewState  { crewName: string; levelId: string; epoch: uint8; players: Map<sessionId, PlayerState> }
-PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolean }
+CrewState   { crewName: string; levelId: string; epoch: uint8;
+              parts: string[]; puzzle: PuzzleState; finished: boolean;
+              players: Map<sessionId, PlayerState> }
+PuzzleState { id, title, stage, observer: sessionId, mechanic: sessionId,
+              attempts: uint16, solved: boolean }
+PlayerState { name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolean }
 ```
 
-В состоянии только то, что нужно **всем** для отрисовки. `playerId` из БД хранится в `client.userData` на сервере и клиентам не уходит.
+В состоянии только то, что нужно **всем** для отрисовки. Приватные данные ролей (вид головоломки) в состояние не попадают: сервер рассылает каждому игроку только его роль через `puzzle.view`. `playerId` из БД хранится в `client.userData` на сервере и клиентам не уходит.
 
 ### 5.2 Жизненный цикл
 
@@ -129,12 +138,17 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 
 | Направление | Тип | Данные | Обработка |
 |---|---|---|---|
-| C→S | `move` | `{x,y,z,vx,vy,anim,facing}` | `sanitizeMove` → запись в `PlayerState`, игрок помечается для сохранения |
+| C→S | `move` | `{levelId,x,y,z,vx,vy,anim,facing}` | сброс пакета чужого уровня → `sanitizeMove` → запись в `PlayerState`, игрок помечается для сохранения |
 | C→S | `chat.say` | `{text}` | обрезка до 300 символов → рассылка `chat`, журнал, шина |
+| C→S | `interact` | `{stationId}` | станция рядом? → рассказчик / занять роль / прыжок в эпоху / возврат на корабль |
+| C→S | `puzzle.action` | `{action, value?, role?}` | действие может делать только держатель роли → `puzzle.act(role, action, value)` |
 | S→C | `chat` | `{from,name,text,ts}` | строка в чате |
-| S→C | `system` | `{text}` | системная строка («X на борту») |
+| S→C | `system` | `{text}` | системная строка («X на борту», результат действия) |
+| S→C | `say` | `{agentId, speaker, text, hint?}` | реплика рассказчика/бортового ИИ (субтитры) |
+| S→C | `puzzle.view` | `{puzzleId, role, view}` | приватный вид головоломки — только держателю роли |
+| S→C | `teleport` | `{levelId, x, y, z}` | мгновенный перенос при смене эпохи |
 
-Остальные типы из дизайн-дока (`grab`, `role.take`, `puzzle.action`, `agent.ask`, …) зарезервированы комментариями в `protocol.ts`.
+Остальные типы из дизайн-дока (`grab`, `release`, `agent.ask`, …) зарезервированы комментариями в `protocol.ts`.
 
 ## 6. Синхронизация движения
 
@@ -219,6 +233,8 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 
 **Роли:** мастер — авторизованный создатель комнаты (`hostPlayerId` в RoomManager), удалять комнату и смотреть её карточку может только он. Гости подключаются к Colyseus-комнате через matchmake или hello-канал.
 
+**Как ходит клиент:** лобби вызывает `POST /auth/login` (имя → JWT, хранится в localStorage), затем создание комнаты — `POST /room` (`{crewName?, isPublic?}`) и вход через `joinById`; matchmake-запросы SDK уходят с `Authorization: Bearer` (токен проставляется в `client.http.authToken`). Публичные комнаты попадают в UDP-маяк и список `/api/rooms`.
+
 ## 9. Клиент: UI
 
 ### 9.1 Лобби
@@ -260,6 +276,7 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 | Hello-WS | проба `ws`-клиентом: 4 события с интервалами ~1 с → POST disconnect → сокет закрыт (1000); без токена — HTTP 401, чужая комната — 404 | проходит |
 | UDP-бродкаст | `UDP_BROADCAST_ADDR=127.0.0.1` + `npm run udp-listen -w server`: пакеты `{roomId, crewName, host, port}` каждые 1.5 с, приватные не бродкастятся. Широковещательный адрес по умолчанию `255.255.255.255` (на реальной LAN) | проходит |
 | JWT_SECRET | при заданном секрете валидный Bearer проходит matchmake (`@colyseus/auth` декодирует), кривой — отклоняется `AUTH_FAILED` (525), без токена — анонимно | проходит |
+| Playthrough (2 бота, весь игровой цикл) | `npm run playthrough -w server` (сервер запущен): 5 эпох → головоломки решены обоими ролями → 5 деталей → финал; Наблюдатель ни разу не получает вид Механика и наоборот; прогресс сохранён в SQLite | проходит |
 | Статика (prod) | `npm run build && npm start`: `/` и неизвестные GET с `Accept: text/html` → index.html, `/api/*` и `/room/*` мимо статикой не накрываются | проходит |
 | Браузер | Две изолированные сессии headless Chrome (puppeteer-core, скрипт вне репозитория): лобби → создание → второй видит комнату в списке → вход по коду → бег и прыжок → чат → скриншоты обоих экранов; затем приглашение: копирование на хосте → второй открывает ссылку по LAN-IP → код подставлен → вход → копирование без clipboard API | проходит, ошибок в консоли нет |
 
@@ -273,8 +290,8 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 
 | Ограничение | Последствие | Как закрыть |
 |---|---|---|
-| Игрок определяется только по имени | Кто угодно может зайти под чужим именем и получить его сохранённую позицию | Токен уже есть (`POST /auth/login`); осталось требовать его в `static onAuth(token)` комнаты и мэтчить игрока по `sub`, а не по `options.name`. Пароль при необходимости — поле `password_hash` в схеме. |
-| Комнаты Colyseus принимают анонимный вход | matchmake без токена проходит (`@colyseus/auth` пропускает анонима); авторизация обязательна только в REST/hello-API | Требовать Bearer в matchmake-роуте, когда фронт перейдёт на токены |
+| Игрок определяется только по имени | Кто угодно может зайти под чужим именем и получить его сохранённую позицию | Токен уже есть, клиент шлёт его на matchmake; осталось мэтчить игрока по `sub` токена в `static onAuth(token)` комнаты, а не по `options.name`. Пароль при необходимости — поле `password_hash` в схеме. |
+| Matchmake принимает анонимный вход | Сервер не требует Bearer: без токена matchmake проходит (`@colyseus/auth` пропускает анонима) — клиент уже шлёт токен, но сервер не обязан | Добавить `requireAuth` на matchmake-роут, если понадобится жёсткое требование |
 | Сервер не проверяет коллизии с платформами | Можно проходить сквозь платформы и «лететь» вверх в пределах лимита скорости | Перенести проверку «стоит на опоре» на сервер, если станет важно |
 | Проверка дубликата имени — только среди подключённых | Пока игрок ждёт переподключения (20 с), под его именем может войти второй — в состоянии будут два игрока с одним именем | Учитывать и отключённых, либо отдавать новому входу место отключённого |
 | Сглаживание вместо буфера снимков | При большой задержке или потерях пакетов возможны рывки | Буфер снимков с отставанием ~100 мс |

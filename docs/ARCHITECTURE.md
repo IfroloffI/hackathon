@@ -43,8 +43,10 @@
 - **Приватные данные ролей** (Наблюдатель/Механик) — через `StateView`/`@view()` Colyseus Schema либо `client.send` адресно, но **не** в общем state.
 - **Код комнаты = `roomId`** (4 символа без похожих букв), уникален и среди живых комнат, и среди сессий в БД — поэтому позиции в `player_state` привязаны к сессии.
 - **Fastify владеет единственным http.Server** (отличие от первоначального решения «Express из транспорта Colyseus»): auth, RoomManager, UDP-beacon и hello-WS — на Fastify; Colyseus-транспорт прицеплен через `attachToServer` с фильтром апгрейдов, matchmake-контракт SDK воспроизведён в Fastify-роуте. `express` остался только зависимостью транспорта.
-- **Auth — имя → JWT (без паролей)**: токен обязателен для REST `/room*` и hello-WS; Colyseus-комнаты пока принимают анонимный вход (переход на `static onAuth(token)` — следующий шаг).
-- **RoomManager — REST-обёртка над Colyseus**, не отдельная сущность: комнаты живут в Colyseus, менеджер хранит мастера/публичность в in-memory Map.
+- **Auth — имя → JWT (без паролей)**: клиент хранит токен в localStorage и шлёт его на matchmake (`client.http.authToken` → Bearer) и в POST /room; сервер пока не обязан его требовать (анонимный matchmake остаётся).
+- **RoomManager — REST-обёртка над Colyseus**, не отдельная сущность: комнаты живут в Colyseus, менеджер хранит мастера/публичность в in-memory Map. Лобби создаёт комнаты именно через `POST /room` — публичные попадают в UDP-маяк.
+- **Головоломки — чистые state-machine** (`server/src/puzzles/`, ноль зависимости от транспорта): комнатой управляются через `act(role, action, value)`, клиент каждого игрока получает только вид своей роли (`puzzle.view`), прогресс — в `CrewState.parts`.
+- **Физика платформ — в `shared/physics.ts`**, считается на клиенте (`moveAndCollide`); сервер ограничивает правдоподобие (`sanitizeMove`) и границы уровня.
 - **Идентичность пока по имени** (`players.name UNIQUE`); `players.password_hash` — задел под логин с паролем.
 - **БД пишется не на каждый `move`**: dirty-набор и пачка раз в 5 с в одной транзакции + при выходе/dispose.
 
