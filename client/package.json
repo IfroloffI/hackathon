@@ -10,9 +10,10 @@
   },
   "dependencies": {
     "@chronolet/shared": "*",
+    "@colyseus/schema": "^5.0.43",
     "@colyseus/sdk": "^0.18.8",
-    "three": "^0.180.0",
-    "@colyseus/schema": "^5.0.43"
+    "livekit-client": "^2.23.0",
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",

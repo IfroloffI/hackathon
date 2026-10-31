@@ -72,6 +72,25 @@ export interface HelloEvent {
   ts: number;
 }
 
+// ---------- Голосовой чат (LiveKit) ----------
+
+/** POST /room/{id}/voice-token — ответ. */
+export interface VoiceTokenResponse {
+  /** ws(s)-URL LiveKit, к которому подключается браузер. */
+  url: string;
+  /** JWT участника (AccessToken LiveKit). */
+  token: string;
+  /** Имя LiveKit-комнаты. */
+  room: string;
+}
+
+/** GET /api/livekit — доступность голосового чата и адрес сервера. */
+export interface LiveKitStatusResponse {
+  enabled: boolean;
+  /** Публичный ws(s)-URL или null, если LiveKit выключен. */
+  url: string | null;
+}
+
 // ---------- UDP-бродкаст публичных комнат ----------
 
 /** Порт UDP-бродкаста по умолчанию (TCP-порт сервера 2567 не трогаем). */

@@ -39,7 +39,7 @@ export function mountPuzzlePanel(room: CrewRoom): () => void {
     body.replaceChildren();
     if (mine.length === 0) {
       body.innerHTML = pz.solved
-        ? '<p class="ok">Деталь получена! Все — к хронолёту (зелёный круг слева) и E.</p>'
+        ? '<p class="ok">Деталь получена! Все — к Колизиуму (зелёный круг слева) и E.</p>'
         : '<p class="muted">Подойди к светящемуся кругу роли (голубой — Наблюдатель, оранжевый — Механик) и нажми <kbd>E</kbd>. Свободные руки — помогайте словом или делом.</p>';
       return;
     }

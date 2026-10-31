@@ -8,9 +8,11 @@ import {
   type AuthPlayer,
   type CreateRoomRequest,
   type JoinOptions,
+  type LiveKitStatusResponse,
   type ManagedRoomInfo,
   type PlayerState,
   type RoomListing,
+  type VoiceTokenResponse,
 } from '@chronolet/shared';
 
 /**
@@ -127,6 +129,11 @@ function expired(e: unknown): unknown {
   return new AuthError('Сессия истекла — войдите снова');
 }
 
+/** Текущий токен для обычных fetch-запросов (голос, API комнат). */
+export function currentAuthToken(): string | null {
+  return client.http.authToken ?? storedAuth()?.token ?? null;
+}
+
 function isAuthError(e: unknown): boolean {
   const code = (e as { code?: unknown }).code;
   if (code === 401 || code === 525) { return true; }
@@ -144,6 +151,35 @@ export const net = {
     const res = await fetch(`${SERVER_URL}/api/host`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return ((await res.json()) as { addresses: string[] }).addresses;
+  },
+
+  /** Доступен ли голосовой чат и по какому адресу подключаться. */
+  async livekitStatus(): Promise<LiveKitStatusResponse> {
+    const res = await fetch(`${SERVER_URL}/api/livekit`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as LiveKitStatusResponse;
+  },
+
+  /**
+   * Токен участника LiveKit для комнаты. Требует Bearer-токена Colyseus:
+   * сервер проверяет, что игрок действительно сидит в этой игровой комнате.
+   */
+  async voiceToken(roomId: string): Promise<VoiceTokenResponse> {
+    requireAuth();
+    const token = currentAuthToken();
+    const res = await fetch(`${SERVER_URL}/room/${encodeURIComponent(roomId)}/voice-token`, {
+      method: 'POST',
+      headers: token === null ? undefined : { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      clearAuth();
+      throw new AuthError('Сессия истекла — войдите снова');
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `voice HTTP ${res.status}`);
+    }
+    return (await res.json()) as VoiceTokenResponse;
   },
 
   /** Мастер: создать комнату через RoomManager (POST /room) и сразу войти в неё. */

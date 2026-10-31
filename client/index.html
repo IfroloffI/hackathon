@@ -3,8 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Хронолёт</title>
-    <link rel="icon" href="data:," />
+    <meta name="description" content="Колизиум — кооперативная игра-спецпроект VK: пять эпох, головоломки на двоих, команда до шести игроков." />
+    <meta name="theme-color" content="#0077FF" />
+    <title>Колизиум — спецпроект VK</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230077FF'/%3E%3Ctext x='32' y='45' font-family='Arial, sans-serif' font-size='34' font-weight='700' fill='white' text-anchor='middle'%3EК%3C/text%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="game"></div>
@@ -16,7 +18,7 @@
           <header class="vk-header">
             <span class="vk-logo">VK</span>
             <div>
-              <h1>Хронолёт</h1>
+              <h1>Колизиум</h1>
               <p class="vk-sub">кооперативное путешествие по истории науки</p>
             </div>
           </header>
@@ -66,7 +68,7 @@
         </div>
 
         <aside class="vk-card lobby-side">
-          <div class="vk-group-title">🏆 Рейтинг хронавтов</div>
+          <div class="vk-group-title">🏆 Рейтинг гладиаторов</div>
           <ol id="leaderboard" class="vk-list rating"><li class="muted">пока пусто — сыграйте первыми</li></ol>
           <div class="vk-group-title">Как играть</div>
           <ul class="howto">
@@ -97,6 +99,10 @@
         <ul id="parts" title="Детали хроно-двигателя"></ul>
         <span id="wallet" title="VK Coin — собирай сферы на уровнях, трать в магазине на борту"><span class="vk-coin">VK</span> <b id="coin-count">0</b></span>
         <span id="net-status" class="ok">● online</span>
+        <span id="voice-status" class="muted">голос: выкл</span>
+        <button id="voice-toggle" class="vk-btn vk-btn-secondary" title="Войти в голосовой чат">🎤 Включить голос</button>
+        <button id="voice-mute" class="vk-btn vk-btn-tertiary" hidden title="Выключить или включить микрофон">🔇 Микрофон</button>
+        <button id="voice-unblock" class="vk-btn vk-btn-tertiary" hidden title="Браузер заблокировал воспроизведение">🔊 Включить звук</button>
         <span class="grow"></span>
         <button id="rating-btn" class="vk-btn vk-btn-tertiary" title="Рейтинг">🏆</button>
         <button id="invite" class="vk-btn vk-btn-primary">Пригласить</button>
@@ -140,7 +146,7 @@
 
       <section id="rating" class="vk-dark-card modal" hidden>
         <div class="shop-head">
-          <h3>🏆 Рейтинг хронавтов</h3>
+          <h3>🏆 Рейтинг гладиаторов</h3>
           <button id="rating-close" class="vk-btn vk-btn-tertiary" title="Закрыть (Esc)">✕</button>
         </div>
         <ol id="rating-list" class="vk-list rating dark"></ol>
@@ -152,13 +158,14 @@
         <div class="vk-dark-card">
           <h2>Хроно-двигатель починен!</h2>
           <p>Пять эпох, пять деталей: гномон Эратосфена, линза Галилея, маятник Ньютона, ротор Тьюринга и топливный элемент Королёва.</p>
-          <p>Хронолёт берёт курс домой. Спасибо, экипаж!</p>
+          <p>Колизиум берёт курс домой. Спасибо, экипаж!</p>
           <p class="muted">ХРОНОС: «Я почти горжусь вами».</p>
         </div>
       </section>
       <p class="help">A/D — бег · W/S — глубина · Пробел — прыжок · E — действие · 1–6 — стикеры · синие сферы — VK Coin</p>
     </section>
 
+    <div id="voice-audio" class="voice-audio"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

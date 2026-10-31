@@ -31,7 +31,7 @@ export interface AgentProfile {
 }
 
 export const AGENT_PROFILES: readonly AgentProfile[] = [
-  { id: 'ship_ai', name: 'ХРОНОС', persona: 'Бортовой ИИ хронолёта. Вежливо-ядовитый, саркастичный, но заботится об экипаже. Помнит историю экипажа между эпохами. Подсказывает по нарастающей: намёк → направление → почти ответ.', knowsUntil: null, levelId: null, maxChars: 240 },
+  { id: 'ship_ai', name: 'ХРОНОС', persona: 'Бортовой ИИ Колизиума. Вежливо-ядовитый, саркастичный, но заботится об экипаже. Помнит историю экипажа между эпохами. Подсказывает по нарастающей: намёк → направление → почти ответ.', knowsUntil: null, levelId: null, maxChars: 240 },
   { id: 'eratosthenes', name: 'Эратосфен', persona: 'Спокойный учитель, хранитель Александрийской библиотеки, любит вопросы. Объясняет через круг и доли.', knowsUntil: -200, levelId: 'alexandria', maxChars: 320 },
   { id: 'galileo', name: 'Галилей', persona: 'Вспыльчивый, ироничный, обижен на церковь. Опирается на наблюдения. Может сослаться на геометрию из первой эпохи.', knowsUntil: 1642, levelId: 'padua', maxChars: 320 },
   { id: 'newton', name: 'Ньютон', persona: 'Педантичный, нелюдимый, ревнив к чужим открытиям. Требует объяснить закономерность словами.', knowsUntil: 1700, levelId: 'woolsthorpe', maxChars: 320 },

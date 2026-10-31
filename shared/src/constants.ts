@@ -6,6 +6,17 @@ export const MAX_CREW = 6;
 /** Порт единственного хоста: API, WebSocket и (в prod) статика клиента. */
 export const SERVER_PORT = 2567;
 
+/** Префикс имени комнаты в LiveKit: одна голосовая комната на игровую. */
+export const LIVEKIT_ROOM_PREFIX = 'chronolet-';
+
+/** Имя LiveKit-комнаты для кода комнаты Colyseus. Должно совпадать на клиенте и сервере. */
+export function livekitRoomName(roomId: string): string {
+  return `${LIVEKIT_ROOM_PREFIX}${roomId}`;
+}
+
+/** Порт LiveKit по умолчанию (signalling ws). */
+export const LIVEKIT_PORT = 7880;
+
 /** Как часто клиент шлёт свою позицию (Гц). */
 export const MOVE_SEND_HZ = 20;
 

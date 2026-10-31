@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import { defineRoom, defineServer, matchMaker } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { CREW_ROOM } from '@chronolet/shared';
@@ -36,7 +38,19 @@ try {
   throw err;
 }
 
-const httpServer = http.createServer();
+const tlsFiles = { cert: safeRead(config.tls.certPath), key: safeRead(config.tls.keyPath) };
+const httpServer = tlsFiles.cert !== null && tlsFiles.key !== null
+  ? https.createServer({ cert: tlsFiles.cert, key: tlsFiles.key })
+  : http.createServer();
+const isHttps = tlsFiles.cert !== null && tlsFiles.key !== null;
+
+function safeRead(p: string): string | null {
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch {
+    return null;
+  }
+}
 
 const transport = new WebSocketTransport({
   noServer: true,
@@ -68,8 +82,8 @@ await app.listen({ port: config.port, host: config.host });
 
 // host 0.0.0.0 — «слушать все интерфейсы», по нему не заходят. Печатаем реальные адреса.
 const urls = config.host === '0.0.0.0' ? ['localhost', ...lanAddresses()] : [config.host];
-console.log(`[chronolet] сервер запущен (слушает ${config.host}:${config.port}), db=${config.dbPath}`);
-for (const h of urls) console.log(`  → http://${h}:${config.port}`);
+console.log(`[chronolet] сервер запущен (слушает ${config.host}:${config.port}, ${isHttps ? 'https' : 'http'}), db=${config.dbPath}`);
+for (const h of urls) console.log(`  → ${isHttps ? 'https' : 'http'}://${h}:${config.port}`);
 console.log(`[chronolet] временные ряды: ${config.tsdbPath}; LLM-поток: ws://<host>:${config.port}/llm/stream?token=…`);
 
 // Остановка — дописать хвост рядов в DuckDB.

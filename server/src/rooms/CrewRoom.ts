@@ -430,7 +430,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     if (!p || !m || typeof skinId !== 'string') return;
     const reply = (ok: boolean, text: string) => client.send(ServerMsg.Shop, { ok, text } satisfies ShopResult);
     const shop = this.level.stations.find((s) => s.kind === 'shop');
-    if (!shop || !isNearStation(shop, p)) return reply(false, 'Магазин — у терминала на борту хронолёта');
+    if (!shop || !isNearStation(shop, p)) return reply(false, 'Магазин — у терминала на борту Колизиума');
     const skin = SKINS.find((s) => s.id === skinId);
     if (!skin) return reply(false, 'Такого скина нет');
 

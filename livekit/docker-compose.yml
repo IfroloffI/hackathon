@@ -1,0 +1,12 @@
+# Голосовой чат для Linux-хоста.
+#   cd livekit && docker compose up -d livekit
+# host network нужен, чтобы LiveKit отдавал браузерам LAN-IP хоста, а не IP контейнера.
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
