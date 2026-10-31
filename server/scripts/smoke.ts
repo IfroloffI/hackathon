@@ -5,6 +5,7 @@
  *   npm run smoke -w server
  */
 import { Client, Callbacks } from '@colyseus/sdk';
+import { authedClient } from './auth.ts';
 import { CREW_ROOM, CrewState, PERSIST_INTERVAL_MS, SERVER_PORT } from '@chronolet/shared';
 
 const url = process.env.SERVER_URL ?? `http://127.0.0.1:${SERVER_PORT}`;
@@ -15,8 +16,15 @@ const assert = (cond: unknown, msg: string) => {
 };
 
 const suffix = Math.random().toString(36).slice(2, 6);
-const a = new Client(url);
-const b = new Client(url);
+const a = await authedClient(url, `alice-${suffix}`);
+const b = await authedClient(url, `bob-${suffix}`);
+
+// Авторизация: без токена — в комнату нельзя, неверный пароль и чужой логин — отказ.
+const post = (path: string, body: unknown) => fetch(`${url}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+assert((await post('/auth/login', { name: `alice-${suffix}`, password: 'неверный-пароль' })).status === 401, 'неверный пароль — 401');
+assert((await post('/auth/register', { name: `alice-${suffix}`, password: 'другой-пароль' })).status === 409, 'занятый логин не зарегистрировать — 409');
+assert((await post('/auth/register', { name: 'ab', password: 'пароль-ок' })).status === 400, 'короткий логин — 400');
+assert((await post('/auth/register', { name: `x-${suffix}`, password: '123' })).status === 400, 'короткий пароль — 400');
 
 const roomA = await a.create(CREW_ROOM, { name: `alice-${suffix}`, crewName: 'Smoke' }, CrewState);
 const quiet = (r: { onMessage: (t: '*', cb: () => void) => unknown }) => r.onMessage('*', () => {});
@@ -30,10 +38,21 @@ const roomB = await b.joinById(roomA.roomId, { name: `bob-${suffix}` }, CrewStat
 quiet(roomB);
 await sleep(200);
 assert(roomB.state.players.size === 2 && roomA.state.players.size === 2, 'оба игрока в state у обоих');
+let anonRejected = false;
+try {
+  await new Client(url).joinById(roomA.roomId, { name: `anon-${suffix}` });
+} catch {
+  anonRejected = true;
+}
+assert(anonRejected, 'без токена в комнату не пускает');
+const spoof = await (await authedClient(url, `eve-${suffix}`)).joinById(roomA.roomId, { name: `alice-${suffix}-fake` }, CrewState);
+await sleep(200);
+assert(spoof.state.players.get(spoof.sessionId)!.name === `eve-${suffix}`, 'имя в комнате — из токена, а не из параметров');
+await spoof.leave();
 
 let dupRejected = false;
 try {
-  await new Client(url).joinById(roomA.roomId, { name: `bob-${suffix}` });
+  await (await authedClient(url, `bob-${suffix}`)).joinById(roomA.roomId, { name: `bob-${suffix}` });
 } catch {
   dupRejected = true;
 }
@@ -70,7 +89,7 @@ await roomA.leave();
 await sleep(300);
 assert(roomB.state.players.size === 1, 'после выхода A у B остался один игрок');
 
-const roomA2 = await new Client(url).joinById(roomA.roomId, { name: `alice-${suffix}` }, CrewState);
+const roomA2 = await (await authedClient(url, `alice-${suffix}`)).joinById(roomA.roomId, { name: `alice-${suffix}` }, CrewState);
 quiet(roomA2);
 await sleep(200);
 const restored = roomA2.state.players.get(roomA2.sessionId)!;

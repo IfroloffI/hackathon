@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { Client } from '@colyseus/sdk';
 import { CREW_ROOM, CrewState, SERVER_PORT, getLevel, type LlmStreamMessage, type SayPayload } from '@chronolet/shared';
 import { connect } from './llm-mock.ts';
+import { authedClient } from './auth.ts';
 
 const url = process.env.SERVER_URL ?? `http://127.0.0.1:${SERVER_PORT}`;
 const token = process.env.LLM_SERVICE_TOKEN ?? 'dev-llm-token';
@@ -40,7 +41,8 @@ await until(() => stream.some((m) => m.type === 'hello'), 'hello');
 const hello = stream.find((m) => m.type === 'hello') as Extract<LlmStreamMessage, { type: 'hello' }>;
 assert(hello.protocol === 'chronolet.llm/1', `hello: ${hello.protocol}, lastSeq=${hello.lastSeq}`);
 
-const room = await new Client(url).create(CREW_ROOM, { name: `llm-${Date.now() % 10000}` }, CrewState);
+const llmName = `llm-${Date.now() % 10000}`;
+const room = await (await authedClient(url, llmName)).create(CREW_ROOM, { name: llmName }, CrewState);
 const says: SayPayload[] = [];
 room.onMessage('*', () => {});
 room.onMessage('say', (m: SayPayload) => says.push(m));

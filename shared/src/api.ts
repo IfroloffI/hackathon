@@ -7,8 +7,16 @@
 // ---------- Auth ----------
 
 /** POST /auth/login — тело запроса. */
+/** POST /auth/login и POST /auth/register — логин и пароль. */
 export interface AuthLoginRequest {
   name: string;
+  password: string;
+}
+
+/** POST /auth/password — смена пароля (с Bearer-токеном). */
+export interface AuthPasswordRequest {
+  oldPassword: string;
+  newPassword: string;
 }
 
 /** Публичные данные игрока (без приватных полей). */

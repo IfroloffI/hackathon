@@ -21,12 +21,26 @@
             </div>
           </header>
 
-          <div class="vk-group">
-            <label class="vk-field-label" for="name">Твоё имя</label>
-            <input id="name" class="vk-input" maxlength="20" placeholder="Например, Ада" autocomplete="off" />
+          <form id="auth-box" class="vk-group" autocomplete="on">
+            <div class="vk-group-title">Вход в аккаунт</div>
+            <input id="login-name" class="vk-input" maxlength="20" placeholder="Логин" autocomplete="username" />
+            <input id="login-pass" class="vk-input" type="password" maxlength="72" placeholder="Пароль" autocomplete="current-password" />
+            <div class="vk-row">
+              <button id="login-btn" type="submit" class="vk-btn vk-btn-primary">Войти</button>
+              <button id="register-btn" type="button" class="vk-btn vk-btn-secondary">Создать аккаунт</button>
+            </div>
+            <p class="vk-hint">Логин — 3–20 символов (буквы, цифры, пробел, _ и -), пароль — от 6 символов.</p>
+          </form>
+
+          <div id="account-box" class="vk-group" hidden>
+            <div class="account">
+              <span id="acc-avatar" class="avatar"></span>
+              <div class="acc-info"><b id="acc-name"></b><small>вы вошли</small></div>
+              <button id="logout-btn" class="vk-btn vk-btn-tertiary">Выйти</button>
+            </div>
           </div>
 
-          <div class="vk-group">
+          <div class="vk-group needs-auth">
             <div class="vk-group-title">Новый экипаж</div>
             <input id="crew" class="vk-input" maxlength="40" placeholder="Название экипажа (необязательно)" autocomplete="off" />
             <label class="vk-check">
@@ -36,7 +50,7 @@
             <button id="create" class="vk-btn vk-btn-primary vk-btn-wide">Создать комнату</button>
           </div>
 
-          <div class="vk-group">
+          <div class="vk-group needs-auth">
             <div class="vk-group-title">Войти к друзьям</div>
             <div class="vk-row">
               <input id="code" class="vk-input code" maxlength="4" placeholder="КОД" autocomplete="off" />
