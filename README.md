@@ -1,6 +1,6 @@
 # Хронолёт
 
-Кооперативная 2.5D-игра в браузере. Дизайн — [docs/chronolet-design.md](docs/chronolet-design.md), архитектура — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Кооперативная 2.5D-игра в браузере. Дизайн — [docs/chronolet-design.md](docs/chronolet-design.md), архитектура — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), подробная спецификация сделанного — [docs/SPEC.md](docs/SPEC.md).
 
 **Один хост:** всё (сайт, WebSocket, БД, позже LLM) крутится на одной машине. Остальные ноутбуки в LAN только открывают браузер.
 
