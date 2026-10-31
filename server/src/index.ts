@@ -4,6 +4,7 @@ import { config } from './config.ts';
 import { CrewRoom } from './rooms/CrewRoom.ts';
 import { mountHttp } from './http/api.ts';
 import { AgentService } from './agents/agentService.ts';
+import { lanAddresses } from './core/network.ts';
 import './db/db.ts';
 
 const server = defineServer({
@@ -17,4 +18,7 @@ const server = defineServer({
 new AgentService().start();
 
 await server.listen(config.port, config.host);
-console.log(`[chronolet] http+ws on http://${config.host}:${config.port}  db=${config.dbPath}`);
+// host 0.0.0.0 — «слушать все интерфейсы», по нему не заходят. Печатаем реальные адреса.
+const urls = config.host === '0.0.0.0' ? ['localhost', ...lanAddresses()] : [config.host];
+console.log(`[chronolet] сервер запущен (слушает ${config.host}:${config.port}), db=${config.dbPath}`);
+for (const h of urls) console.log(`  → http://${h}:${config.port}`);

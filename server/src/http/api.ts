@@ -1,11 +1,11 @@
 import express, { type Application } from 'express';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { matchMaker } from 'colyseus';
 import { CREW_ROOM, type RoomListing } from '@chronolet/shared';
 import { sessions } from '../db/repositories.ts';
 import { config } from '../config.ts';
+import { lanAddresses } from '../core/network.ts';
 
 /** REST поверх того же хоста. Матчмейкинг (create/join) делает сам Colyseus на /matchmake. */
 export function mountHttp(app: Application) {
@@ -56,13 +56,4 @@ export function mountHttp(app: Application) {
     app.use(express.static(config.clientDist));
     app.get(/^\/(?!api|matchmake).*/, (_req, res) => res.sendFile(path.join(config.clientDist, 'index.html')));
   }
-}
-
-/** IPv4-адреса хоста: сначала Wi-Fi/Ethernet (en*, eth*, wlan*), туннели и виртуальные сети — в конец. */
-function lanAddresses(): string[] {
-  const rank = (name: string) => (/^(en|eth|wlan|wl)/.test(name) ? 0 : /^(utun|tun|tap|docker|br-|veth|vboxnet|vmnet|bridge|llw|awdl)/.test(name) ? 2 : 1);
-  return Object.entries(os.networkInterfaces())
-    .flatMap(([name, list]) => (list ?? []).filter((i) => i.family === 'IPv4' && !i.internal).map((i) => ({ name, address: i.address })))
-    .sort((a, b) => rank(a.name) - rank(b.name))
-    .map((i) => i.address);
 }
