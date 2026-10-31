@@ -18,6 +18,7 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
   const lobby = $('lobby');
   const nameInput = $<HTMLInputElement>('name');
   const crewInput = $<HTMLInputElement>('crew');
+  const publicInput = $<HTMLInputElement>('public');
   const codeInput = $<HTMLInputElement>('code');
   const createBtn = $<HTMLButtonElement>('create');
   const joinBtn = $<HTMLButtonElement>('join');
@@ -65,7 +66,7 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
 
   const doCreate = () => {
     const name = getName();
-    if (name) attempt(() => net.create({ name, crewName: crewInput.value.trim() || undefined }));
+    if (name) attempt(() => net.createRoom({ crewName: crewInput.value.trim() || undefined, isPublic: publicInput.checked }, name));
   };
   const doJoin = (code = codeInput.value) => {
     const name = getName();
@@ -128,5 +129,7 @@ function humanError(e: unknown): string {
   if (/not found|no rooms found|invalid/i.test(msg)) return 'Комната не найдена';
   if (/locked|full/i.test(msg)) return 'Комната заполнена';
   if (/fetch|network|ECONNREFUSED/i.test(msg)) return 'Нет связи с сервером';
+  if (/HTTP 401|HTTP 525|AUTH/i.test(msg)) return 'Не удалось войти — попробуй ещё раз';
+  if (/уже занята|occupied/i.test(msg)) return msg;
   return msg;
 }

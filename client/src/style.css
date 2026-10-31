@@ -32,6 +32,8 @@ input {
   background: #fffaf0; color: var(--ink); min-width: 0;
 }
 .muted { color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+label.check input { width: 16px; height: 16px; padding: 0; min-width: 0; }
 .error { color: #b3261e; min-height: 1.2em; margin: 4px 0 0; }
 
 #lobby {
