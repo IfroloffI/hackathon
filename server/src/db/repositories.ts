@@ -59,6 +59,8 @@ const stmt = {
       mistakes_json = excluded.mistakes_json, last_summary = excluded.last_summary, updated_at = excluded.updated_at
   `),
   findPlayerByName: db.prepare('SELECT id, name FROM players WHERE name = ?'),
+  findAccount: db.prepare('SELECT id, name, password_hash FROM players WHERE lower(name) = lower(?)'),
+  setPassword: db.prepare('UPDATE players SET password_hash = ? WHERE id = ?'),
   insertPlayer: db.prepare('INSERT INTO players (id, name, created_at, last_seen_at) VALUES (?, ?, ?, ?)'),
   touchPlayer: db.prepare('UPDATE players SET last_seen_at = ? WHERE id = ?'),
 
@@ -92,7 +94,18 @@ const stmt = {
   ),
 };
 
+export interface AccountRow extends PlayerRow {
+  password_hash: string | null;
+}
+
 export const players = {
+  /** Аккаунт по логину (без учёта регистра — «Ада» и «ада» один игрок). */
+  account(name: string): AccountRow | undefined {
+    return stmt.findAccount.get(name) as AccountRow | undefined;
+  },
+  setPassword(id: string, hash: string) {
+    stmt.setPassword.run(hash, id);
+  },
   /** Авторизация «по имени»: нашли — вернули, нет — завели. */
   findOrCreate(name: string): PlayerRow {
     const now = Date.now();

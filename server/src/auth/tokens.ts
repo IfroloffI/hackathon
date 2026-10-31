@@ -1,11 +1,13 @@
 import { randomUUID, randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import type { AuthPlayer } from '@chronolet/shared';
 import { config } from '../config.ts';
 
 /**
- * Именованный игрок → JWT (HS256). Паролей нет: токен просто подписывает
- * идентичность. Logout работает через in-memory blacklist по `jti`.
+ * Игрок (вход по логину и паролю, см. passwords.ts) → JWT (HS256).
+ * Logout работает через in-memory blacklist по `jti`.
  *
  * Секрет общий с `@colyseus/auth`: при заданном `JWT_SECRET` она сама
  * проверяет Bearer-токены на matchmake-роутах Colyseus.
@@ -15,12 +17,20 @@ let key: Uint8Array | null = null;
 
 function getKey(): Uint8Array {
   if (key === null) {
-    const secret = config.auth.secret;
-    if (secret === undefined || secret.length === 0) {
-      key = randomBytes(32);
-      console.warn('[auth] JWT_SECRET не задан — секрет сгенерирован на этот запуск, токены переживут только его');
-    } else {
+    const secret = process.env.JWT_SECRET;
+    if (secret !== undefined && secret.length > 0) {
       key = new TextEncoder().encode(secret);
+    } else {
+      // Без JWT_SECRET секрет хранится рядом с БД: токены (и вход по паролю) переживают перезапуск сервера.
+      const file = path.join(path.dirname(config.dbPath), '.jwt-secret');
+      try {
+        key = Buffer.from(fs.readFileSync(file, 'utf8').trim(), 'hex');
+      } catch {
+        key = randomBytes(32);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, Buffer.from(key).toString('hex'), { mode: 0o600 });
+        console.warn(`[auth] JWT_SECRET не задан — секрет сгенерирован и сохранён в ${file}`);
+      }
     }
   }
   return key;

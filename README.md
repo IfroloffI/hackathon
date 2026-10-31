@@ -71,11 +71,13 @@ HTTP-слой переписан на **Fastify**: один `node:http`-серв
 
 | Метод | Путь | Тело | Ответ |
 |---|---|---|---|
-| POST | `/auth/login` | `{ name }` | `201 { token, player: { id, name } }` — JWT HS256 |
+| POST | `/auth/register` | `{ name, password }` | `201 { token, player }`; `409` — логин занят; `400` — логин 3–20 символов (буквы, цифры, пробел, _ -), пароль 6–72 |
+| POST | `/auth/login` | `{ name, password }` | `200 { token, player: { id, name } }`; `401` — «Неверный логин или пароль» |
+| POST | `/auth/password` | `{ oldPassword, newPassword }` (Bearer) | `{ ok: true }` |
 | POST | `/auth/logout` | — (Bearer) | `{ ok: true }` — токен уходит в in-memory blacklist |
 | GET | `/auth/me` | — (Bearer) | `{ player: { id, name } }` |
 
-Токен передавать как `Authorization: Bearer <token>`. Паролей нет: имя → токен. Без `JWT_SECRET` секрет генерируется на запуск (токены живут до перезапуска); с заданным `JWT_SECRET` его же использует `@colyseus/auth` на matchmake-роутах.
+Токен передавать как `Authorization: Bearer <token>`. Пароли — scrypt с солью (`server/src/auth/passwords.ts`), не больше 10 попыток входа в минуту на «IP + логин». Аккаунт из времён входа «по имени» (без пароля) можно один раз забрать регистрацией — прогресс сохранится. Без `JWT_SECRET` секрет генерируется один раз и хранится в `data/.jwt-secret` (токены переживают перезапуск). **В комнату пускают только с токеном** — имя игрока берётся из токена, а не из параметров клиента.
 
 ### RoomManager (роли: мастер = создатель, гости)
 

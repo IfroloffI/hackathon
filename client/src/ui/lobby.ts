@@ -1,23 +1,21 @@
-import type { RoomListing } from '@chronolet/shared';
-import { net, type CrewRoom } from '../net/connection.ts';
+import { colorForName, type AuthPlayer, type RoomListing } from '@chronolet/shared';
+import { AuthError, auth, net, type CrewRoom } from '../net/connection.ts';
 import { renderLeaderboard } from './leaderboard.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const NAME_KEY = 'chronolet.name';
-
-function storage(): Storage | null {
-  try {
-    return localStorage;
-  } catch {
-    return null;
-  }
-}
-
-/** Экран лобби: имя, создание комнаты, вход по коду, список открытых комнат. */
+/**
+ * Экран лобби: вход по логину и паролю (или регистрация), затем — создание комнаты,
+ * вход по коду, список открытых комнат и рейтинг. Без входа комнаты недоступны.
+ */
 export function showLobby(onJoined: (room: CrewRoom) => void) {
   const lobby = $('lobby');
-  const nameInput = $<HTMLInputElement>('name');
+  const authBox = $<HTMLFormElement>('auth-box');
+  const accountBox = $('account-box');
+  const loginName = $<HTMLInputElement>('login-name');
+  const loginPass = $<HTMLInputElement>('login-pass');
+  const loginBtn = $<HTMLButtonElement>('login-btn');
+  const registerBtn = $<HTMLButtonElement>('register-btn');
   const crewInput = $<HTMLInputElement>('crew');
   const publicInput = $<HTMLInputElement>('public');
   const codeInput = $<HTMLInputElement>('code');
@@ -27,22 +25,61 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
   const errorEl = $('error');
 
   lobby.hidden = false;
-  nameInput.value = storage()?.getItem(NAME_KEY) ?? '';
-  (nameInput.value ? codeInput : nameInput).focus();
 
   // Ссылка-приглашение вида /?room=ABCD
   const invite = new URLSearchParams(location.search).get('room');
   if (invite) codeInput.value = invite.toUpperCase();
 
-  const getName = () => {
-    const name = nameInput.value.trim();
-    if (!name) {
-      errorEl.textContent = 'Сначала введи имя';
-      nameInput.focus();
-      return null;
+  /** Показать форму входа или карточку аккаунта; комнаты — только после входа. */
+  function renderAuth(player: AuthPlayer | null) {
+    authBox.hidden = !!player;
+    accountBox.hidden = !player;
+    document.querySelectorAll('.needs-auth').forEach((el) => el.classList.toggle('locked', !player));
+    if (player) {
+      const av = $('acc-avatar');
+      av.textContent = player.name.slice(0, 1).toUpperCase();
+      av.style.background = `#${colorForName(player.name).toString(16).padStart(6, '0')}`;
+      $('acc-name').textContent = player.name;
+      (invite ? joinBtn : crewInput).focus();
+    } else {
+      loginPass.value = '';
+      (loginName.value ? loginPass : loginName).focus();
     }
-    storage()?.setItem(NAME_KEY, name);
-    return name;
+  }
+
+  renderAuth(auth.current());
+  // Сохранённый токен мог протухнуть (сменили JWT_SECRET и т. п.) — сверяемся с сервером.
+  void auth.validate().then((p) => renderAuth(p));
+
+  let authBusy = false;
+  async function doAuth(mode: 'login' | 'register') {
+    if (authBusy) return;
+    const name = loginName.value.trim();
+    const password = loginPass.value;
+    if (!name || !password) {
+      errorEl.textContent = 'Введите логин и пароль';
+      return;
+    }
+    authBusy = true;
+    loginBtn.disabled = registerBtn.disabled = true;
+    errorEl.textContent = '';
+    try {
+      renderAuth(await (mode === 'login' ? auth.login(name, password) : auth.register(name, password)));
+    } catch (e) {
+      errorEl.textContent = e instanceof AuthError ? e.message : 'Нет связи с сервером';
+    } finally {
+      authBusy = false;
+      loginBtn.disabled = registerBtn.disabled = false;
+    }
+  }
+  authBox.onsubmit = (e) => {
+    e.preventDefault();
+    void doAuth('login');
+  };
+  registerBtn.onclick = () => void doAuth('register');
+  $('logout-btn').onclick = async () => {
+    await auth.logout();
+    renderAuth(null);
   };
 
   let busy = false;
@@ -58,6 +95,7 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
       history.replaceState(null, '', `?room=${room.roomId}`);
       onJoined(room);
     } catch (e) {
+      if (e instanceof AuthError) renderAuth(null);
       errorEl.textContent = humanError(e);
     } finally {
       busy = false;
@@ -65,27 +103,22 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
     }
   };
 
-  const doCreate = () => {
-    const name = getName();
-    if (name) attempt(() => net.createRoom({ crewName: crewInput.value.trim() || undefined, isPublic: publicInput.checked }, name));
-  };
+  const doCreate = () => attempt(() => net.createRoom({ crewName: crewInput.value.trim() || undefined, isPublic: publicInput.checked }));
   const doJoin = (code = codeInput.value) => {
-    const name = getName();
-    if (!name) return;
     if (code.trim().length !== 4) {
       errorEl.textContent = 'Код комнаты — 4 символа';
       return;
     }
-    attempt(() => net.joinByCode(code, { name }));
+    void attempt(() => net.joinByCode(code));
   };
 
-  createBtn.onclick = doCreate;
+  createBtn.onclick = () => void doCreate();
   joinBtn.onclick = () => doJoin();
   codeInput.onkeydown = (e) => {
     if (e.key === 'Enter') doJoin();
   };
   crewInput.onkeydown = (e) => {
-    if (e.key === 'Enter') doCreate();
+    if (e.key === 'Enter') void doCreate();
   };
   $('refresh').onclick = () => refresh();
 
@@ -127,11 +160,11 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
 }
 
 function humanError(e: unknown): string {
+  if (e instanceof AuthError) return e.message;
   const msg = e instanceof Error ? e.message : String(e);
   if (/not found|no rooms found|invalid/i.test(msg)) return 'Комната не найдена';
   if (/locked|full/i.test(msg)) return 'Комната заполнена';
   if (/fetch|network|ECONNREFUSED/i.test(msg)) return 'Нет связи с сервером';
-  if (/HTTP 401|HTTP 525|AUTH/i.test(msg)) return 'Не удалось войти — попробуй ещё раз';
-  if (/уже занята|occupied/i.test(msg)) return msg;
+  if (/уже в этой комнате|уже занята|occupied/i.test(msg)) return msg;
   return msg;
 }

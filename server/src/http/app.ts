@@ -10,6 +10,7 @@ import { registerLlmRoutes } from '../llm/routes.ts';
 import { timeseries } from '../timeseries/store.ts';
 import { config } from '../config.ts';
 import { getBearerToken, issueToken, revokeToken, verifyToken, type VerifiedPlayer } from '../auth/tokens.ts';
+import { hashPassword, passwordProblem, verifyPassword } from '../auth/passwords.ts';
 import * as roomManager from '../rooms/roomManager.ts';
 import { closeRoomChannels, disconnectPlayer } from '../net/helloHub.ts';
 import { lanAddresses } from '../net/lan.ts';
@@ -51,14 +52,56 @@ export async function buildApp(httpServer: HttpServer): Promise<FastifyInstance>
 
   // ---------- auth ----------
 
-  app.post('/auth/login', async (req, reply) => {
-    const name = normalizeName((req.body as { name?: unknown } | null)?.name);
-    if (name === null) {
-      return reply.code(400).send({ error: 'Нужно имя игрока (1–20 символов)' });
-    }
-    const player = players.findOrCreate(name);
+  /**
+   * Регистрация: логин + пароль. Логин уже занят аккаунтом с паролем — 409.
+   * Аккаунт из времён входа «по имени» (без пароля) можно один раз «забрать», задав пароль:
+   * прогресс (XP, монеты, скины) сохраняется.
+   */
+  app.post('/auth/register', async (req, reply) => {
+    const body = (req.body ?? {}) as { name?: unknown; password?: unknown };
+    const name = normalizeName(body.name);
+    if (name === null) return reply.code(400).send({ error: `Логин — ${NAME_RULE}` });
+    const bad = passwordProblem(body.password);
+    if (bad) return reply.code(400).send({ error: bad });
+    if (!loginAllowed(req.ip, name)) return reply.code(429).send({ error: 'Слишком много попыток — подождите минуту' });
+    const existing = players.account(name);
+    if (existing?.password_hash) return reply.code(409).send({ error: `Логин «${name}» уже занят` });
+    const hash = await hashPassword(body.password as string);
+    const player = existing ?? players.findOrCreate(name);
+    players.setPassword(player.id, hash);
     const token = await issueToken({ id: player.id, name: player.name });
     return reply.code(201).send({ token, player: { id: player.id, name: player.name } });
+  });
+
+  app.post('/auth/login', async (req, reply) => {
+    const body = (req.body ?? {}) as { name?: unknown; password?: unknown };
+    const name = normalizeName(body.name);
+    if (name === null || typeof body.password !== 'string') return reply.code(400).send({ error: 'Нужны логин и пароль' });
+    if (!loginAllowed(req.ip, name)) return reply.code(429).send({ error: 'Слишком много попыток — подождите минуту' });
+    const account = players.account(name);
+    if (account && !account.password_hash) {
+      return reply.code(401).send({ error: 'У этого логина ещё нет пароля — зарегистрируйтесь, чтобы задать его' });
+    }
+    // Одинаковый ответ для «нет такого логина» и «неверный пароль».
+    if (!account || !(await verifyPassword(body.password, account.password_hash))) {
+      return reply.code(401).send({ error: 'Неверный логин или пароль' });
+    }
+    const token = await issueToken({ id: account.id, name: account.name });
+    return reply.code(200).send({ token, player: { id: account.id, name: account.name } });
+  });
+
+  app.post('/auth/password', { preHandler: requireAuth }, async (req, reply) => {
+    const player = authed(req);
+    if (player === null) return reply.code(401).send({ error: 'Требуется авторизация: POST /auth/login' });
+    const body = (req.body ?? {}) as { oldPassword?: unknown; newPassword?: unknown };
+    const bad = passwordProblem(body.newPassword);
+    if (bad) return reply.code(400).send({ error: bad });
+    const account = players.account(player.name);
+    if (!account || typeof body.oldPassword !== 'string' || !(await verifyPassword(body.oldPassword, account.password_hash))) {
+      return reply.code(401).send({ error: 'Старый пароль не подходит' });
+    }
+    players.setPassword(account.id, await hashPassword(body.newPassword as string));
+    return { ok: true };
   });
 
   app.post('/auth/logout', { preHandler: requireAuth }, async (req) => {
@@ -221,9 +264,23 @@ async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<vo
   (req as AuthedRequest).player = player;
 }
 
+const NAME_RULE = '3–20 символов: буквы, цифры, пробел, _ и -';
+
+/** Логин: 3–20 символов, буквы (любые), цифры, пробел, «_» и «-». */
 function normalizeName(raw: unknown): string | null {
-  const name = typeof raw === 'string' ? raw.trim().slice(0, 20) : '';
-  return name.length > 0 ? name : null;
+  const name = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  return /^[\p{L}\p{N} _-]{3,20}$/u.test(name) ? name : null;
+}
+
+/** Не больше 10 попыток входа/регистрации в минуту на пару «IP + логин». */
+const attempts = new Map<string, number[]>();
+function loginAllowed(ip: string, name: string): boolean {
+  const key = `${ip}|${name.toLowerCase()}`;
+  const now = Date.now();
+  const recent = (attempts.get(key) ?? []).filter((t) => now - t < 60_000);
+  recent.push(now);
+  attempts.set(key, recent);
+  return recent.length <= 10;
 }
 
 function matchmakeErrorStatus(e: unknown): number {

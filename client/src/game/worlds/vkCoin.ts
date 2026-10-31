@@ -6,6 +6,23 @@ import { VK_BLUE } from '@chronolet/shared';
  * внутри — фирменный значок: синий скруглённый квадрат VK с белой надписью «VK».
  */
 let badgeTexture: THREE.CanvasTexture | null = null;
+let glowTexture: THREE.CanvasTexture | null = null;
+
+/** Мягкое синее свечение — спрайт вместо источника света. */
+function glowMap(): THREE.CanvasTexture {
+  if (glowTexture) return glowTexture;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(0,119,255,0.9)');
+  g.addColorStop(0.45, 'rgba(0,119,255,0.35)');
+  g.addColorStop(1, 'rgba(0,119,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  glowTexture = new THREE.CanvasTexture(c);
+  return glowTexture;
+}
 
 function badge(): THREE.CanvasTexture {
   if (badgeTexture) return badgeTexture;
@@ -58,8 +75,13 @@ export function vkCoin(x: number, y: number, z: number, phase: number): CoinView
   back.rotation.y = Math.PI;
   const icon = new THREE.Group();
   icon.add(front, back);
-  const halo = new THREE.PointLight(VK_BLUE, 1.2, 2.5);
-  root.add(bubble, shine, icon, halo);
+  // Ореол — спрайт, а не PointLight: если менять число источников света в сцене, three.js
+  // перекомпилирует шейдеры ВСЕХ материалов — именно это давало фриз ~0,5 с при подборе сферы.
+  const halo = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glowMap(), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+  );
+  halo.scale.setScalar(1.6);
+  root.add(halo, bubble, shine, icon);
 
   let popping: { t0: number; done: () => void } | null = null;
   let now = 0;

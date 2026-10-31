@@ -1,4 +1,4 @@
-import { Room, matchMaker, type Client } from 'colyseus';
+import { Room, ServerError, matchMaker, type AuthContext, type Client } from 'colyseus';
 import {
   AGENT_PROFILES,
   ASK_TIMEOUT_MS,
@@ -62,6 +62,7 @@ import { createPuzzle, type ActionResult, type Puzzle } from '../puzzles/index.t
 import { NARRATOR_LINES, SHIP_AI_EVENTS } from '../agents/lines.ts';
 import { nextLine } from '../agents/memory.ts';
 import { config } from '../config.ts';
+import { verifyToken } from '../auth/tokens.ts';
 
 interface ClientData {
   playerId: string;
@@ -174,12 +175,17 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     });
   }
 
-  onAuth(_client: Client, options: JoinOptions) {
-    const name = normalizeName(options?.name);
+  /**
+   * Вход в комнату — только с JWT, выданным после логина и пароля (SDK передаёт его сам).
+   * Имя берётся из токена, а не из параметров клиента: выдать себя за другого нельзя.
+   */
+  async onAuth(_client: Client, _options: JoinOptions, context: AuthContext) {
+    const player = context?.token ? await verifyToken(context.token) : null;
+    if (!player) throw new ServerError(401, 'Нужно войти: логин и пароль');
     for (const p of this.state.players.values()) {
-      if (p.name === name && p.connected) throw new Error(`Имя «${name}» уже занято в этой комнате`);
+      if (p.name === player.name && p.connected) throw new ServerError(409, `«${player.name}» уже в этой комнате`);
     }
-    return { name };
+    return { name: player.name };
   }
 
   onJoin(client: CrewClient, _options: JoinOptions, auth: { name: string }) {

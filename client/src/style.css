@@ -98,6 +98,11 @@ kbd {
 .vk-row .vk-input { flex: 1; }
 .vk-check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--vk-text-2); }
 .vk-check input { accent-color: var(--vk-blue); width: 18px; height: 18px; }
+.vk-hint { margin: 0; font-size: 13px; color: var(--vk-text-2); }
+.account { display: flex; align-items: center; gap: 12px; }
+.acc-info { flex: 1; display: flex; flex-direction: column; }
+.acc-info small { color: var(--vk-text-2); }
+.needs-auth.locked { opacity: 0.45; pointer-events: none; }
 .code { text-transform: uppercase; letter-spacing: 6px; max-width: 120px; text-align: center; font-weight: 600; }
 .vk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 #rooms li.room { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--vk-sep); }

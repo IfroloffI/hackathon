@@ -61,27 +61,70 @@ function clearAuth(): void {
   client.http.authToken = undefined;
 }
 
-/**
- * Имя → токен (POST /auth/login). Повторный вход под тем же именем
- * переиспользует сохранённый токен. Токен проставляется в SDK: matchmake
- * уходит с `Authorization: Bearer`, WS — с `?_authToken=`.
- */
-export async function ensureLogin(name: string): Promise<AuthPlayer> {
+// Сохранённая сессия подхватывается сразу при загрузке страницы.
+{
   const saved = storedAuth();
-  if (saved && saved.player.name === name) {
-    client.http.authToken = saved.token;
-    return saved.player;
-  }
-  const res = await fetch(`${SERVER_URL}/auth/login`, {
+  if (saved) client.http.authToken = saved.token;
+}
+
+export class AuthError extends Error {}
+
+async function authRequest(path: '/auth/login' | '/auth/register', name: string, password: string): Promise<AuthPlayer> {
+  const res = await fetch(`${SERVER_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, password }),
   });
-  if (!res.ok) { throw new Error(`login HTTP ${res.status}`); }
-  const auth = (await res.json()) as AuthLoginResponse;
-  saveAuth(auth);
-  client.http.authToken = auth.token;
-  return auth.player;
+  const body = (await res.json().catch(() => ({}))) as Partial<AuthLoginResponse> & { error?: string };
+  if (!res.ok || !body.token || !body.player) throw new AuthError(body.error ?? `HTTP ${res.status}`);
+  saveAuth({ token: body.token, player: body.player });
+  client.http.authToken = body.token;
+  return body.player;
+}
+
+/**
+ * Вход по логину и паролю → JWT. Токен хранится в localStorage и проставляется в SDK:
+ * matchmake уходит с `Authorization: Bearer`, WS — с `?_authToken=`; комната берёт имя из токена.
+ */
+export const auth = {
+  current(): AuthPlayer | null {
+    return storedAuth()?.player ?? null;
+  },
+  login: (name: string, password: string) => authRequest('/auth/login', name, password),
+  register: (name: string, password: string) => authRequest('/auth/register', name, password),
+  async logout() {
+    const saved = storedAuth();
+    clearAuth();
+    if (saved) await fetch(`${SERVER_URL}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${saved.token}` } }).catch(() => {});
+  },
+  /** Сохранённый токен ещё действует? Если нет — забываем его (нужно войти заново). */
+  async validate(): Promise<AuthPlayer | null> {
+    const saved = storedAuth();
+    if (!saved) return null;
+    try {
+      const res = await fetch(`${SERVER_URL}/auth/me`, { headers: { Authorization: `Bearer ${saved.token}` } });
+      if (res.status === 401) {
+        clearAuth();
+        return null;
+      }
+      return saved.player;
+    } catch {
+      return saved.player; // сервер недоступен — не разлогиниваем
+    }
+  },
+};
+
+function requireAuth(): AuthPlayer {
+  const player = auth.current();
+  if (!player) throw new AuthError('Сначала войдите');
+  return player;
+}
+
+/** Токен отозван/протух — забываем его, лобби покажет форму входа. */
+function expired(e: unknown): unknown {
+  if (!isAuthError(e)) return e;
+  clearAuth();
+  return new AuthError('Сессия истекла — войдите снова');
 }
 
 function isAuthError(e: unknown): boolean {
@@ -104,41 +147,31 @@ export const net = {
   },
 
   /** Мастер: создать комнату через RoomManager (POST /room) и сразу войти в неё. */
-  async createRoom(opts: CreateRoomRequest, name: string): Promise<CrewRoom> {
-    await ensureLogin(name);
-    const join = async (): Promise<CrewRoom> => {
+  async createRoom(opts: CreateRoomRequest): Promise<CrewRoom> {
+    const me = requireAuth();
+    try {
       const res = await fetch(`${SERVER_URL}/room`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${client.http.authToken}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${storedAuth()!.token}` },
         body: JSON.stringify(opts),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
+        throw Object.assign(new Error(body?.error ?? `HTTP ${res.status}`), { code: res.status });
       }
       const info = (await res.json()) as ManagedRoomInfo;
-      return withState(client.joinById(info.roomId, { name }, CrewState));
-    };
-    try {
-      return await join();
+      return await withState(client.joinById(info.roomId, { name: me.name }, CrewState));
     } catch (e) {
-      if (!isAuthError(e)) { throw e; }
-      clearAuth();
-      await ensureLogin(name);
-      return await join();
+      throw expired(e);
     }
   },
 
-  async joinByCode(code: string, opts: JoinOptions): Promise<CrewRoom> {
-    await ensureLogin(opts.name);
-    const join = (): Promise<CrewRoom> => withState(client.joinById(code.trim().toUpperCase(), opts, CrewState));
+  async joinByCode(code: string): Promise<CrewRoom> {
+    const me = requireAuth();
     try {
-      return await join();
+      return await withState(client.joinById(code.trim().toUpperCase(), { name: me.name }, CrewState));
     } catch (e) {
-      if (!isAuthError(e)) { throw e; }
-      clearAuth();
-      await ensureLogin(opts.name);
-      return await join();
+      throw expired(e);
     }
   },
 

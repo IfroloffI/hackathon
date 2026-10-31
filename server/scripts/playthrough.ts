@@ -22,6 +22,7 @@ import {
   type ShopResult,
 } from '@chronolet/shared';
 import { solve } from './solvers.ts';
+import { authedClient } from './auth.ts';
 
 const url = process.env.SERVER_URL ?? `http://127.0.0.1:${SERVER_PORT}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -97,8 +98,8 @@ class Bot {
 }
 
 const tag = Math.random().toString(36).slice(2, 6);
-const a = new Bot(await new Client(url).create(CREW_ROOM, { name: `obs-${tag}`, crewName: 'Playthrough' }, CrewState));
-const b = new Bot(await new Client(url).joinById(a.room.roomId, { name: `mech-${tag}` }, CrewState));
+const a = new Bot(await (await authedClient(url, `obs-${tag}`)).create(CREW_ROOM, { name: `obs-${tag}`, crewName: 'Playthrough' }, CrewState));
+const b = new Bot(await (await authedClient(url, `mech-${tag}`)).joinById(a.room.roomId, { name: `mech-${tag}` }, CrewState));
 console.log(`комната ${a.room.roomId}`);
 await sleep(200);
 
@@ -170,7 +171,7 @@ for (const epoch of EPOCHS) {
 
 // Магазин на борту.
 const shopSt = getLevel('hub').stations.find((s) => s.kind === 'shop')!;
-const c = new Bot(await new Client(url).joinById(a.room.roomId, { name: `poor-${tag}` }, CrewState));
+const c = new Bot(await (await authedClient(url, `poor-${tag}`)).joinById(a.room.roomId, { name: `poor-${tag}` }, CrewState));
 await sleep(200);
 await Promise.all([a.walkTo(shopSt.x, 0), b.walkTo(shopSt.x + 0.5, 0), c.walkTo(shopSt.x - 0.5, 0)]);
 const poor = await c.shopReply(() => c.room.send('shop.buy', { skinId: 'spotty' }));
@@ -207,7 +208,7 @@ await a.room.leave();
 await b.room.leave();
 
 // Кошелёк и скины живут между сессиями.
-const again2 = new Bot(await new Client(url).create(CREW_ROOM, { name: `obs-${tag}` }, CrewState));
+const again2 = new Bot(await (await authedClient(url, `obs-${tag}`)).create(CREW_ROOM, { name: `obs-${tag}` }, CrewState));
 await sleep(300);
 assert(again2.me.coins === coinsLeft && again2.me.skin === 'spotty' && again2.me.owned.includes('spotty'), `после перезахода: ${again2.me.coins} VK Coin, скин ${again2.me.skin}`);
 await again2.room.leave();
