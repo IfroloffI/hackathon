@@ -10,8 +10,14 @@ import { config } from '../config.ts';
 /** REST поверх того же хоста. Матчмейкинг (create/join) делает сам Colyseus на /matchmake. */
 export function mountHttp(app: Application) {
   app.use((req, res, next) => {
-    // В dev клиент живёт на порту Vite — разрешаем кросс-доменные запросы внутри LAN.
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+    }
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') return void res.sendStatus(204);
     next();
