@@ -1,9 +1,9 @@
-import { PHYSICS, PLAYER_SIZE, type Anim, type Level, type MovePayload } from '@chronolet/shared';
+import { PHYSICS, moveAndCollide, resolvePenetration, type Anim, type Level, type MovePayload } from '@chronolet/shared';
 
 const MAX_FALL_SPEED = 20;
 
 /**
- * Ввод + простая AABB-физика платформера. Клиент считает своё движение сам,
+ * Ввод + AABB-физика платформера (общая, из shared). Клиент считает своё движение сам,
  * сервер только проверяет правдоподобие (server/src/rooms/movement.ts).
  */
 export class LocalController {
@@ -12,6 +12,7 @@ export class LocalController {
   z: number;
   vx = 0;
   vy = 0;
+  vz = 0;
   facing: 1 | -1 = 1;
   anim: Anim = 'idle';
   private grounded = false;
@@ -20,10 +21,11 @@ export class LocalController {
   enabled = true;
 
   constructor(
-    private level: Level,
+    public level: Level,
     spawn: { x: number; y: number; z: number },
   ) {
     ({ x: this.x, y: this.y, z: this.z } = spawn);
+    resolvePenetration(this, level);
     addEventListener('keydown', this.onKeyDown);
     addEventListener('keyup', this.onKeyUp);
     addEventListener('blur', this.onBlur);
@@ -37,7 +39,8 @@ export class LocalController {
 
   teleport(p: { x: number; y: number; z: number }) {
     ({ x: this.x, y: this.y, z: this.z } = p);
-    this.vx = this.vy = 0;
+    this.vx = this.vy = this.vz = 0;
+    resolvePenetration(this, this.level);
   }
 
   update(dt: number) {
@@ -46,41 +49,29 @@ export class LocalController {
     const depth = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
 
     this.vx = dir * PHYSICS.runSpeed;
+    this.vz = depth * PHYSICS.depthSpeed;
     if (dir) this.facing = dir > 0 ? 1 : -1;
 
     if (this.jumpQueued && this.grounded) this.vy = PHYSICS.jumpSpeed;
     this.jumpQueued = false;
     this.vy = Math.max(this.vy - PHYSICS.gravity * dt, -MAX_FALL_SPEED);
 
-    const { bounds } = this.level;
-    const halfW = PLAYER_SIZE.w / 2;
-    this.x = Math.min(bounds.maxX, Math.max(bounds.minX, this.x + this.vx * dt));
-    this.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, this.z + depth * PHYSICS.depthSpeed * dt));
+    // Объекты твёрдые со всех сторон и по глубине: shared/src/physics.ts.
+    this.grounded = moveAndCollide(this, dt, this.level).grounded;
 
-    // Вертикаль: приземление только сверху на платформу (one-way platforms).
-    const prevY = this.y;
-    this.y += this.vy * dt;
-    this.grounded = false;
-    if (this.vy <= 0) {
-      for (const p of this.level.platforms) {
-        const top = p.y + p.h / 2;
-        const overlapX = this.x + halfW > p.x - p.w / 2 && this.x - halfW < p.x + p.w / 2;
-        if (overlapX && prevY >= top - 0.001 && this.y <= top) {
-          this.y = top;
-          this.vy = 0;
-          this.grounded = true;
-          break;
-        }
-      }
-    }
-
-    if (this.y < bounds.minY) this.teleport(this.level.spawn);
+    if (this.y < this.level.bounds.minY) this.teleport(this.level.spawn);
 
     this.anim = !this.grounded ? (this.vy > 0 ? 'jump' : 'fall') : this.vx !== 0 ? 'run' : 'idle';
   }
 
+  /** Смена уровня по команде сервера. */
+  setLevel(level: Level, p: { x: number; y: number; z: number }) {
+    this.level = level;
+    this.teleport(p);
+  }
+
   snapshot(): MovePayload {
-    return { x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, anim: this.anim, facing: this.facing };
+    return { levelId: this.level.id, x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, anim: this.anim, facing: this.facing };
   }
 
   private onKeyDown = (e: KeyboardEvent) => {

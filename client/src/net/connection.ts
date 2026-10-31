@@ -1,4 +1,5 @@
 import { Client, Callbacks, type Room } from '@colyseus/sdk';
+import { $refId } from '@colyseus/schema';
 import {
   CREW_ROOM,
   CrewState,
@@ -36,14 +37,31 @@ export const net = {
   },
 
   create(opts: CreateOptions): Promise<CrewRoom> {
-    return client.create(CREW_ROOM, opts, CrewState);
+    return withState(client.create(CREW_ROOM, opts, CrewState));
   },
 
   joinByCode(code: string, opts: JoinOptions): Promise<CrewRoom> {
-    return client.joinById(code.trim().toUpperCase(), opts, CrewState);
+    return withState(client.joinById(code.trim().toUpperCase(), opts, CrewState));
   },
 
   callbacks(room: CrewRoom) {
     return Callbacks.get(room);
   },
 };
+
+/**
+ * SDK отдаёт комнату сразу после подтверждения входа, а полное состояние приходит следующим сообщением.
+ * Ждём его, чтобы игра и HUD подписывались на уже декодированный state (иначе вложенные схемы без refId).
+ */
+async function withState(pending: Promise<CrewRoom>): Promise<CrewRoom> {
+  const room = await pending;
+  // У корня refId есть сразу, а вложенная схема получает его только после декодирования.
+  const puzzle = room.state.puzzle as unknown as Record<symbol, unknown> | undefined;
+  if (!puzzle || puzzle[$refId] === undefined) {
+    await new Promise<void>((resolve) => {
+      room.onStateChange.once(() => resolve());
+      setTimeout(resolve, 5000);
+    });
+  }
+  return room;
+}

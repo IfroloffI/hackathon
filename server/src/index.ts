@@ -9,6 +9,7 @@ import { attachHelloHub, isHelloPath } from './net/helloHub.ts';
 import { startUdpBeacon } from './net/udpBeacon.ts';
 import { listRooms } from './rooms/roomManager.ts';
 import { AgentService } from './agents/agentService.ts';
+import { lanAddresses } from './net/lan.ts';
 import './db/db.ts';
 
 /**
@@ -48,4 +49,7 @@ startUdpBeacon(async () => {
 const app = await buildApp(httpServer);
 await app.listen({ port: config.port, host: config.host });
 
-console.log(`[chronolet] http+ws on http://${config.host}:${config.port}  db=${config.dbPath}`);
+// host 0.0.0.0 — «слушать все интерфейсы», по нему не заходят. Печатаем реальные адреса.
+const urls = config.host === '0.0.0.0' ? ['localhost', ...lanAddresses()] : [config.host];
+console.log(`[chronolet] сервер запущен (слушает ${config.host}:${config.port}), db=${config.dbPath}`);
+for (const h of urls) console.log(`  → http://${h}:${config.port}`);

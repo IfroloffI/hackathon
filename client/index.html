@@ -36,6 +36,8 @@
       <div class="panel hud-top">
         <span>Комната <b id="room-code"></b></span>
         <span id="crew-name" class="muted"></span>
+        <span id="location"></span>
+        <ul id="parts" title="Детали хроно-двигателя"></ul>
         <span id="net-status" class="ok">online</span>
         <button id="invite">Скопировать приглашение</button>
         <button id="leave" class="ghost">Выйти</button>
@@ -46,7 +48,21 @@
         <input id="chat-input" maxlength="300" placeholder="Enter — написать" autocomplete="off" />
       </div>
       <p id="toast" class="panel" hidden></p>
-      <p class="help">A/D или ←/→ — бег · W/S — глубина · Пробел — прыжок</p>
+      <p id="subtitle" class="panel" hidden></p>
+      <p id="prompt" hidden></p>
+      <section id="puzzle" class="panel" hidden>
+        <div id="puzzle-head"></div>
+        <div id="puzzle-body"></div>
+      </section>
+      <section id="finale" hidden>
+        <div class="panel">
+          <h2>Хроно-двигатель починен!</h2>
+          <p>Пять эпох, пять деталей: гномон Эратосфена, линза Галилея, маятник Ньютона, ротор Тьюринга и топливный элемент Королёва.</p>
+          <p>Хронолёт берёт курс домой. Спасибо, экипаж!</p>
+          <p class="muted">ХРОНОС: «Я почти горжусь вами».</p>
+        </div>
+      </section>
+      <p class="help">A/D или ←/→ — бег · W/S — глубина · Пробел — прыжок · E — действие у светящегося круга</p>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

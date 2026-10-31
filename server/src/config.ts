@@ -26,6 +26,8 @@ export const config = {
     port: Number(process.env.UDP_PORT ?? UDP_BROADCAST_PORT),
     intervalMs: Number(process.env.UDP_INTERVAL_MS ?? 1500),
   },
+  /** Для разработки: один игрок может занять обе роли. На хакатоне выключено — головоломки строго на двоих. */
+  soloRoles: process.env.CHRONOLET_SOLO === '1',
   ollama: {
     enabled: process.env.OLLAMA_ENABLED === '1',
     url: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
