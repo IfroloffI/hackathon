@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   ClientMsg,
   EMOTES,
@@ -50,6 +51,11 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.95;
+    // Мягкое «студийное» окружение: ткань и пластик получают объёмные блики, как в диораме под софтбоксом.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     container.append(this.renderer.domElement);
     addEventListener('resize', this.onResize);
     addEventListener('keydown', this.onKeyDown);
@@ -102,6 +108,7 @@ export class Game {
     this.local?.ctrl.dispose();
     this.local?.view.dispose();
     this.world?.dispose();
+    this.scene.environment?.dispose();
     this.prompt.hidden = true;
     this.renderer.dispose();
     this.renderer.domElement.remove();
