@@ -65,17 +65,19 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     if (s.kind !== 'narrator' || !s.agent || !NPC_LOOK[s.agent]) continue;
     const name = EPOCHS.find((e) => e.narrator.id === s.agent)?.narrator.name ?? s.agent;
     const npc = new Character(name, 0xffe066, { npc: NPC_LOOK[s.agent] });
-    npc.root.position.set(s.x, s.y, -1.2);
+    npc.root.position.set(s.x, s.y, -0.9);
     g.add(npc.root);
     npcs.push(npc);
   }
 
   const decor = (THEMES[level.id] ?? decorateHub)(g, scene);
 
-  // Мигающие светодиоды пультов.
+  // Мигающие светодиоды пультов и анимированные объекты (батуты, вентиляторы, метки станций…).
   const leds: THREE.Mesh[] = [];
+  const animated: ((t: number) => void)[] = [];
   g.traverse((o) => {
     if (o.userData.blink !== undefined) leds.push(o as THREE.Mesh);
+    if (typeof o.userData.update === 'function') animated.push(o.userData.update);
   });
 
   return {
@@ -83,8 +85,9 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
       decor.update?.(t);
       for (const m of markers) {
         const ring = m.userData.pulse as THREE.Mesh;
-        ring.scale.setScalar(1 + Math.sin(t * 3) * 0.06);
+        ring.scale.setScalar(1 + Math.sin(t * 3) * 0.05);
       }
+      for (const f of animated) f(t);
       for (const l of leds) l.visible = Math.sin(t * 2 + l.userData.blink * 1.7) > -0.3;
       coins.forEach((c) => c.update(t));
       popping.forEach((f) => f(t));

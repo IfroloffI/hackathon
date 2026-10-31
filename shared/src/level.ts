@@ -18,7 +18,14 @@ export type PlatformLook =
   | 'hut'
   | 'tree'
   | 'cannon'
-  | 'table';
+  | 'table'
+  // Интерактивные объекты (пока только вид, механика — позже; клиент: worlds/props.ts).
+  | 'crate'
+  | 'rope'
+  | 'trampoline'
+  | 'fan'
+  | 'arrows'
+  | 'moat';
 
 export interface Platform {
   /** Центр и размеры. Без z/d объект занимает всю глубину дорожки (стены, пол). */
@@ -116,20 +123,20 @@ export const HUB_LEVEL: Level = {
   bounds: { minX: -15, maxX: 15, ...LANE },
   spawn: { x: -4, y: 0, z: 0 },
   platforms: [
-    { ...ground(-16, 16, 0x3a4250) },
-    { x: -15.6, y: 4, w: 1.2, h: 9, color: 0x4a5568, kind: 'wall', decor: true },
-    { x: 15.6, y: 4, w: 1.2, h: 9, color: 0x4a5568, kind: 'wall', decor: true },
+    { ...ground(-16, 16, 0x4a5a9a) },
+    { x: -15.6, y: 4, w: 1.2, h: 9, color: 0x2a3460, kind: 'wall', decor: true },
+    { x: 15.6, y: 4, w: 1.2, h: 9, color: 0x2a3460, kind: 'wall', decor: true },
     // Мостки: каждая ступень не выше ~2.1 от предыдущей, под ними проходит голова (1.2).
-    ledge(-10, 5, 2.1, 0x56627a),
-    ledge(-5.5, 2.5, 4.1, 0x56627a),
-    ledge(10.5, 5, 2.1, 0x56627a),
-    { x: 6.5, y: 0.5, w: 1, h: 1, z: 1, d: 1, color: 0xc98a3a }, // ящик с запчастями в переднем ряду
+    ledge(-10, 5, 2.1, 0x6c8cff),
+    ledge(-5.5, 2.5, 4.1, 0x6c8cff),
+    ledge(10.5, 5, 2.1, 0x6c8cff),
+    { x: 6.5, y: 0.5, w: 1, h: 1, z: 1, d: 1, color: 0xc98a3a, kind: 'crate' }, // ящик с запчастями в переднем ряду
     // Хроно-двигатель в глубине: задевает только того, кто ушёл назад (W).
     { x: 0, y: 1.5, w: 3.2, h: 3, z: -2.6, d: 3.2, color: 0x6c7a8c, kind: 'engine' },
     { x: 0, y: 3.6, w: 1.2, h: 1.2, z: -2.6, d: 1.2, color: 0x7fd8ff, kind: 'engineCore' },
-    { x: 12.5, y: 0.6, w: 2.4, h: 1.2, z: -2.2, d: 1.2, color: 0x2d3748, kind: 'console' },
-    { x: 4, y: 0.5, w: 1.2, h: 1, z: -2.2, d: 1, color: 0x2d3748, kind: 'console' },
-    { x: -12.5, y: 0.6, w: 1.6, h: 1.2, z: -2.2, d: 1.2, color: 0x0b3a7a, kind: 'console' }, // терминал магазина
+    { x: 12.5, y: 0.6, w: 2.4, h: 1.2, z: -2.2, d: 1.2, color: 0x4a5590, kind: 'console' },
+    { x: 4, y: 0.5, w: 1.2, h: 1, z: -2.2, d: 1, color: 0x4a5590, kind: 'console' },
+    { x: -12.5, y: 0.6, w: 1.6, h: 1.2, z: -2.2, d: 1.2, color: 0x0077ff, kind: 'console' }, // терминал магазина
   ],
   stations: [
     { id: 'jump', kind: 'jump', x: 4, y: 0, label: 'Рычаг прыжка' },
@@ -173,7 +180,7 @@ export const ALEXANDRIA_LEVEL: Level = {
 };
 
 // ───────────── Падуя: мастерская за стенами (перелезть по ящикам), балконы до крыши, один — только вглубь.
-const STONE = 0x7d6a5a;
+const STONE = 0x9a6a4a;
 export const PADUA_LEVEL: Level = {
   id: 'padua',
   title: 'Падуя, 1610',
