@@ -153,7 +153,7 @@ export function stars(count: number, radius: number, color = 0xffffff, size = 0.
   return new THREE.Points(geo, new THREE.PointsMaterial({ color, size, sizeAttenuation: true, fog: false }));
 }
 
-/** Приземлившийся хронолёт в эпохе — к нему возвращаются за прыжком. */
+/** Приземлившийся Колизиум в эпохе — к нему возвращаются за прыжком. */
 export function landedShip(x: number): THREE.Object3D {
   const g = new THREE.Group();
   g.position.set(x, 0, -2.6);

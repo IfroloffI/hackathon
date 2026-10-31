@@ -96,7 +96,7 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
 
   function renderLocation() {
     const e = epochByLevel(room.state.levelId);
-    $('location').textContent = e ? `Эпоха ${e.index + 1}/5 · ${e.title}, ${e.year}` : 'Борт хронолёта';
+    $('location').textContent = e ? `Эпоха ${e.index + 1}/5 · ${e.title}, ${e.year}` : 'Борт Колизиума';
   }
 
   function renderParts() {

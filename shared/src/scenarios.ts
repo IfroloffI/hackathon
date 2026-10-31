@@ -63,7 +63,7 @@ function epochScenario(levelId: string, title: string, agent: string, narrator: 
     const last = i === puzzleStages.length - 1;
     steps.push({ id: `stage${i + 1}`, title: `Этап ${i + 1}`, goal: s.goal, done: last ? { kind: 'solved' } : { kind: 'stages', atLeast: i + 1 }, parSeconds: s.par, rolesOpen: true });
   });
-  steps.push({ id: 'extract', title: 'Эвакуация', goal: 'Все к хронолёту — и E', done: { kind: 'aboard' }, parSeconds: 60, rolesOpen: true, cue: 'Деталь у нас. Все на борт!' });
+  steps.push({ id: 'extract', title: 'Эвакуация', goal: 'Все к Колизиуму — и E', done: { kind: 'aboard' }, parSeconds: 60, rolesOpen: true, cue: 'Деталь у нас. Все на борт!' });
   return { id: `scn_${levelId}`, levelId, title, steps, bonuses: BONUSES };
 }
 

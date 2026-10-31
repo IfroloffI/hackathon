@@ -13,7 +13,7 @@ const PART_COLORS: Record<string, number> = {
 };
 
 /**
- * Борт хронолёта: отсек с хроно-двигателем, панорамными иллюминаторами в космос,
+ * Борт Колизиума: отсек с хроно-двигателем, панорамными иллюминаторами в космос,
  * мостками, пультом ХРОНОСа и рычагом прыжка. Пять гнёзд двигателя загораются по мере сбора деталей.
  */
 export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
@@ -100,7 +100,7 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   const holoCore = mesh(new THREE.SphereGeometry(0.16, 12, 10), glow(0x5fe3ff, 2), 12.5, 2.4, -2.2, false);
   g.add(holo, holoCore);
 
-  g.add(signSprite('ХРОНОЛЁТ', 0, 6.6, -3.9, 6, '#7fd8ff'));
+  g.add(signSprite('КОЛИЗИУМ', 0, 6.6, -3.9, 6, '#7fd8ff'));
   g.add(signSprite('ХРОНОС', 12.5, 3.3, -2.2, 2.4, '#5fe3ff'));
   g.add(signSprite('ПРЫЖОК', 4, 2.4, -2.2, 2.2, '#ff6b6b'));
 

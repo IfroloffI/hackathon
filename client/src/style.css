@@ -1,4 +1,4 @@
-/* ─────────────── Хронолёт · дизайн в духе VK (VKUI-подобные токены) ─────────────── */
+/* ─────────────── Колизиум · дизайн в духе VK (VKUI-подобные токены) ─────────────── */
 :root {
   --vk-blue: #0077ff;
   --vk-blue-hover: #0068e0;
@@ -31,6 +31,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0d14; }
 #game { position: fixed; inset: 0; }
 #game canvas { display: block; }
 
+/* фокус-кольцо по дизайн-контракту: видим всегда, не удаляем */
+:focus-visible { outline: 2px solid var(--vk-blue); outline-offset: 2px; border-radius: var(--r-s); }
+.vk-dark-card :focus-visible { outline-color: var(--vk-blue-light); }
+
 .muted { color: var(--vk-text-2); }
 .ok { color: var(--vk-green); }
 .bad { color: var(--vk-red); }
@@ -40,21 +44,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0d14; }
 button { font: inherit; cursor: pointer; }
 .vk-btn, #hud button {
   border: 0; border-radius: var(--r-s); padding: 8px 16px; font-weight: 500; line-height: 20px;
-  background: var(--vk-blue); color: #fff; transition: background 0.15s, transform 0.05s;
+  background: var(--vk-blue); color: #fff; transition: background 0.15s ease, color 0.15s ease, transform 0.05s ease;
 }
 .vk-btn:active, #hud button:active { transform: scale(0.97); }
 .vk-btn-primary { background: var(--vk-blue); color: #fff; }
 .vk-btn-primary:hover { background: var(--vk-blue-hover); }
 .vk-btn-secondary { background: var(--vk-secondary-bg); color: var(--vk-blue); }
+.vk-btn-secondary:hover { background: #dbe0e6; }
 .vk-btn-tertiary, #hud button.ghost, #hud .vk-btn-tertiary { background: transparent; color: var(--vk-blue); padding: 6px 10px; }
+.vk-btn-tertiary:hover { background: rgba(0, 119, 255, 0.08); }
 #hud .vk-btn-tertiary, #hud button.ghost { color: var(--vk-blue-light); }
+#hud .vk-btn-tertiary:hover, #hud button.ghost:hover { background: rgba(113, 170, 235, 0.12); }
 #hud button.on { background: var(--vk-blue); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
 .vk-btn-wide { width: 100%; padding: 11px 16px; font-size: 16px; }
 .vk-input, #hud input:not([type='range']):not([type='checkbox']) {
   font: inherit; padding: 10px 12px; border-radius: var(--r-s); min-width: 0;
   border: 1px solid var(--vk-sep); background: #f2f3f5; color: var(--vk-text); outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
+.vk-input:hover:not(:focus):not(:disabled) { border-color: #c3ccd6; }
 .vk-input:focus { border-color: var(--vk-blue); background: #fff; }
 #hud input:not([type='range']):not([type='checkbox']), .vk-input.dark {
   background: var(--vk-d-secondary); color: var(--vk-d-text); border-color: var(--vk-d-sep);
@@ -84,7 +93,7 @@ kbd {
 .lobby-grid { display: grid; grid-template-columns: minmax(0, 460px) minmax(0, 320px); gap: 16px; justify-content: center; align-items: start; }
 .vk-card { background: var(--vk-card); border-radius: var(--r-l); box-shadow: 0 2px 24px rgba(0, 0, 0, 0.08); padding: 20px; }
 .vk-header { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; }
-.vk-header h1 { margin: 0; font-size: 26px; letter-spacing: 0.2px; }
+.vk-header h1 { margin: 0; font-size: 26px; letter-spacing: -0.2px; font-weight: 600; }
 .vk-sub { margin: 2px 0 0; color: var(--vk-text-2); }
 .vk-logo {
   width: 52px; height: 52px; border-radius: 15px; background: var(--vk-blue); color: #fff; flex: none;
@@ -104,14 +113,19 @@ kbd {
 .acc-info small { color: var(--vk-text-2); }
 .needs-auth.locked { opacity: 0.45; pointer-events: none; }
 .code { text-transform: uppercase; letter-spacing: 6px; max-width: 120px; text-align: center; font-weight: 600; }
+.code, .code-tag, .xp-num, #coin-count, .obj-timer, .hud-top .room b, #wallet b { font-variant-numeric: tabular-nums; }
 .vk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-#rooms li.room { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--vk-sep); }
+#rooms li.room { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--vk-sep); transition: background 0.15s ease; }
+#rooms li.room:hover { background: #f7f8fa; }
 #rooms li.room:last-child { border-bottom: 0; }
 #rooms .code-tag { font-family: monospace; font-weight: 700; letter-spacing: 2px; color: var(--vk-blue); }
 #rooms button { background: var(--vk-secondary-bg); color: var(--vk-blue); border: 0; border-radius: var(--r-s); padding: 6px 14px; font-weight: 500; }
 .rating li { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--vk-sep); }
 .rating li:last-child { border-bottom: 0; }
-.rating .place { width: 22px; text-align: center; font-weight: 700; color: var(--vk-text-2); }
+.rating .place { width: 22px; text-align: center; font-weight: 700; color: var(--vk-text-2); font-variant-numeric: tabular-nums; }
+.rating li:nth-child(1) .place { color: #e6a700; }
+.rating li:nth-child(2) .place { color: #98a2b3; }
+.rating li:nth-child(3) .place { color: #c77b3f; }
 .rating .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rating .xp-num { font-weight: 600; color: var(--vk-blue); }
 .rating.dark li { border-color: var(--vk-d-sep); }

@@ -93,7 +93,7 @@ export function respawnPoint(level: Level, fellAtX: number): { x: number; y: num
 const LANE = { minZ: -1.5, maxZ: 1.5, minY: -5 };
 const EPOCH_BOUNDS = { minX: -30, maxX: 30, ...LANE };
 const EPOCH_SPAWN = { x: -21, y: 0, z: 0 };
-const returnStation: Station = { id: 'return', kind: 'return', x: -24, y: 0, label: 'Хронолёт: вернуться на борт' };
+const returnStation: Station = { id: 'return', kind: 'return', x: -24, y: 0, label: 'Колизиум: вернуться на борт' };
 
 /** Кусок пола от x0 до x1 (верх y=0). Между кусками — ямы: упал — вернулся к чекпоинту. */
 const ground = (x0: number, x1: number, color: number): Platform => ({ x: (x0 + x1) / 2, y: -0.5, w: x1 - x0, h: 1, color, kind: 'floor' });
@@ -112,7 +112,7 @@ const coins = (levelId: string, list: [number, number, number?][]): Coin[] =>
 
 export const HUB_LEVEL: Level = {
   id: 'hub',
-  title: 'Хронолёт — борт корабля',
+  title: 'Колизиум — борт корабля',
   bounds: { minX: -15, maxX: 15, ...LANE },
   spawn: { x: -4, y: 0, z: 0 },
   platforms: [
