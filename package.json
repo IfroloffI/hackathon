@@ -18,10 +18,15 @@
     "build": "npm run build -w client",
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
-    "test": "npm test -w shared && npm test -w server"
+    "test": "npm test -w shared && npm test -w server",
+    "livekit": "concurrently -k -n livekit,tls -c blue,green \"bash scripts/livekit.sh\" \"node scripts/livekit-tls.mjs\""
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.9.5",
+    "livekit-server-sdk": "^2.19.2"
   }
 }

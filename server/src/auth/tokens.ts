@@ -1,15 +1,12 @@
 import { randomUUID, randomBytes } from 'node:crypto';
-import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
+import { SignJWT, jwtVerify } from 'jose';
+import { AccessToken } from 'livekit-server-sdk';
 import type { AuthPlayer } from '@chronolet/shared';
 import { config } from '../config.ts';
 
-/**
- * Именованный игрок → JWT (HS256). Паролей нет: токен просто подписывает
- * идентичность. Logout работает через in-memory blacklist по `jti`.
- *
- * Секрет общий с `@colyseus/auth`: при заданном `JWT_SECRET` она сама
- * проверяет Bearer-токены на matchmake-роутах Colyseus.
- */
+// ============================================================
+// JWT для Colyseus
+// ============================================================
 
 let key: Uint8Array | null = null;
 
@@ -18,7 +15,7 @@ function getKey(): Uint8Array {
     const secret = config.auth.secret;
     if (secret === undefined || secret.length === 0) {
       key = randomBytes(32);
-      console.warn('[auth] JWT_SECRET не задан — секрет сгенерирован на этот запуск, токены переживут только его');
+      console.warn('[auth] JWT_SECRET не задан');
     } else {
       key = new TextEncoder().encode(secret);
     }
@@ -26,7 +23,7 @@ function getKey(): Uint8Array {
   return key;
 }
 
-const revokedJti = new Set<string>();
+let revokedJti = new Set<string>();
 
 export interface VerifiedPlayer extends AuthPlayer {
   jti: string;
@@ -45,8 +42,7 @@ export async function issueToken(player: AuthPlayer): Promise<string> {
 export async function verifyToken(token: string): Promise<VerifiedPlayer | null> {
   try {
     const { payload } = await jwtVerify(token, getKey(), { algorithms: ['HS256'] });
-    const player = toPlayer(payload);
-    if (player === null) { return null; }
+    const player = { id: String(payload.sub), name: String(payload.name), jti: String(payload.jti) };
     if (player.jti !== undefined && revokedJti.has(player.jti)) { return null; }
     return player;
   } catch {
@@ -56,30 +52,41 @@ export async function verifyToken(token: string): Promise<VerifiedPlayer | null>
 
 export function revokeToken(token: string): void {
   try {
-    const decoded = decodeJti(token);
-    if (decoded !== null) { revokedJti.add(decoded); }
-  } catch {
-    // невалидный токен и так не пройдёт verify — добавлять нечего
-  }
-}
-
-function decodeJti(token: string): string | null {
-  // jose::decodeJwt не проверяет подпись — jti нужен только для blacklist,
-  // сам факт отсутствия подписи отсеется в verifyToken.
-  const [, payloadPart] = token.split('.');
-  if (payloadPart === undefined) { return null; }
-  const payload = JSON.parse(new TextDecoder().decode(Buffer.from(payloadPart, 'base64url'))) as { jti?: string };
-  return typeof payload.jti === 'string' ? payload.jti : null;
-}
-
-function toPlayer(payload: JWTPayload): VerifiedPlayer | null {
-  const { sub, name, jti } = payload;
-  if (typeof sub !== 'string' || typeof name !== 'string' || name.length === 0) { return null; }
-  return { id: sub, name, jti: typeof jti === 'string' ? jti : '' };
+    const [, payloadPart] = token.split('.');
+    if (payloadPart) {
+      const p = JSON.parse(Buffer.from(payloadPart, 'base64url').toString());
+      if (p.jti) revokedJti.add(p.jti);
+    }
+  } catch { }
 }
 
 export function getBearerToken(headerValue: string | undefined): string | null {
   if (headerValue === undefined) { return null; }
   const [scheme, token] = headerValue.split(' ', 2);
   return scheme?.toLowerCase() === 'bearer' && token ? token : null;
+}
+
+// ============================================================
+// LiveKit Access Token
+// ============================================================
+
+/**
+ * Настоящий AccessToken LiveKit (JWT, подписанный HMAC API-секретом).
+ * Только с таким токеном LiveKit пустит участника в комнату и разрешит
+ * публиковать/слушать аудио. `identity` — стабильный id игрока.
+ */
+export async function issueLiveKitToken(player: AuthPlayer, room: string): Promise<string> {
+  const at = new AccessToken(config.livekit.apiKey, config.livekit.apiSecret, {
+    identity: player.id,
+    name: player.name,
+    ttl: config.livekit.ttl,
+  });
+  at.addGrant({
+    room,
+    roomJoin: true,
+    canPublish: true,
+    canSubscribe: true,
+    canPublishData: true,
+  });
+  return await at.toJwt();
 }

@@ -43,6 +43,10 @@
         <span id="location"></span>
         <ul id="parts" title="Детали хроно-двигателя"></ul>
         <span id="net-status" class="ok">online</span>
+        <span id="voice-status" class="muted">голос: выкл</span>
+        <button id="voice-toggle" title="Войти в голосовой чат">🎤 Включить голос</button>
+        <button id="voice-mute" class="ghost" hidden title="Выключить или включить микрофон">🔇 Микрофон</button>
+        <button id="voice-unblock" class="ghost" hidden title="Браузер заблокировал воспроизведение">🔊 Включить звук</button>
         <button id="invite">Скопировать приглашение</button>
         <button id="leave" class="ghost">Выйти</button>
       </div>
@@ -69,6 +73,7 @@
       <p class="help">A/D или ←/→ — бег · W/S — глубина · Пробел — прыжок · E — действие у светящегося круга</p>
     </section>
 
+    <div id="voice-audio" class="voice-audio"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

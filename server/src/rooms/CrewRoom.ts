@@ -80,7 +80,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     }
   }
 
-  async onCreate(options: CreateOptions) {
+async onCreate(options: CreateOptions) {
     this.roomId = await this.generateCode();
     const hostName = normalizeName(options.name);
     const crewName = (options.crewName?.trim() || `Экипаж ${hostName}`).slice(0, 40);

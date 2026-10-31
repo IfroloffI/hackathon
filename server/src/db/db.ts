@@ -30,6 +30,7 @@ const MIGRATIONS: string[] = [
     session_id TEXT NOT NULL,
     epoch INTEGER NOT NULL DEFAULT 0,
     x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
+    connected INTEGER NOT NULL DEFAULT 1,
     roles_played_json TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (player_id, session_id)

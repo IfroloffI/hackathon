@@ -5,3 +5,6 @@ data/*.db
 data/*.db-*
 .DS_Store
 *.log
+
+.cache/
+livekit/certs/

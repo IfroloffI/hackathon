@@ -1,5 +1,6 @@
 import { ClientMsg, EPOCHS, ServerMsg, epochByLevel, type ChatBroadcast, type SayPayload } from '@chronolet/shared';
 import { net, type CrewRoom, type NetPlayer } from '../net/connection.ts';
+import { VoiceChat, type VoiceSnapshot } from '../net/voice.ts';
 import { copyText, inviteLink } from './invite.ts';
 import { mountPuzzlePanel } from './puzzlePanel.ts';
 
@@ -12,6 +13,7 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
   const chatLog = $<HTMLUListElement>('chat-log');
   const chatInput = $<HTMLInputElement>('chat-input');
   const status = $('net-status');
+  let speakers = new Set<string>();
 
   hud.hidden = false;
   $('room-code').textContent = room.roomId;
@@ -88,10 +90,13 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
     room.state.players.forEach((p, id) => {
       const li = document.createElement('li');
       if (!p.connected) li.className = 'off';
+      const speaking = p.connected && speakers.has(p.name.toLowerCase());
+      if (speaking) li.classList.add('speaking');
       const dot = document.createElement('span');
       dot.className = 'dot';
       dot.style.background = `#${p.color.toString(16).padStart(6, '0')}`;
       li.append(dot, `${p.name}${id === room.sessionId ? ' (ты)' : ''}`);
+      if (speaking) li.append(Object.assign(document.createElement('span'), { className: 'wave', textContent: '▮▮▮' }));
       crewList.append(li);
     });
   }
@@ -128,6 +133,54 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
 
   const toast = $('toast');
   let toastTimer = 0;
+
+  // ── голосовой чат (LiveKit): кнопка, статус, микрофон и «кто говорит» ──
+  const voice = new VoiceChat(room.roomId, () => room.state.players.get(room.sessionId)?.name ?? '');
+  const voiceStatus = $('voice-status');
+  const voiceToggle = $<HTMLButtonElement>('voice-toggle');
+  const voiceMute = $<HTMLButtonElement>('voice-mute');
+  const voiceUnblock = $<HTMLButtonElement>('voice-unblock');
+  let livekitOff = false;
+
+  const voiceLabel = (s: VoiceSnapshot): string => {
+    switch (s.state) {
+      case 'off': return 'голос: выкл';
+      case 'connecting': return 'голос: подключение…';
+      case 'reconnecting': return 'голос: переподключение…';
+      case 'error': return `голос: ${s.error ?? 'ошибка'}`;
+      case 'live': return `голос: в эфире · ${s.participants}${s.muted ? ' (микрофон выкл)' : ''}`;
+    }
+  };
+
+  const unbindVoice = voice.onChange((s) => {
+    voiceStatus.textContent = voiceLabel(s);
+    voiceStatus.className = s.state === 'live' ? 'ok' : s.state === 'error' || s.state === 'reconnecting' ? 'bad' : 'muted';
+    voiceToggle.textContent = s.state === 'off' || s.state === 'error' ? '🎤 Включить голос' : '⏹ Отключить голос';
+    voiceToggle.disabled = s.state === 'connecting' || (livekitOff && s.state === 'off');
+    voiceToggle.classList.toggle('on', s.state === 'live');
+    voiceMute.hidden = s.state !== 'live';
+    voiceMute.textContent = s.muted ? '🔇 Микрофон выкл' : '🎙 Микрофон вкл';
+    voiceMute.classList.toggle('on', !s.muted);
+    voiceUnblock.hidden = !s.audioBlocked;
+    speakers = new Set(s.speakers.map((n) => n.toLowerCase()));
+    renderCrew();
+  });
+
+  voiceToggle.onclick = () => {
+    if (voice.enabled) void voice.disable();
+    else void voice.enable();
+  };
+  voiceMute.onclick = () => void voice.toggleMute();
+  voiceUnblock.onclick = () => void voice.resumeAudio();
+
+  void net.livekitStatus().then((s) => {
+    if (s.enabled || voice.enabled) return;
+    livekitOff = true;
+    voiceStatus.textContent = 'голос: выключен на сервере';
+    voiceStatus.className = 'bad';
+    voiceToggle.disabled = true;
+  }).catch(() => undefined);
+
   $('invite').onclick = async () => {
     const link = await inviteLink(room.roomId);
     const copied = await copyText(link);
@@ -139,6 +192,8 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
 
   return () => {
     unbind.forEach((u) => u());
+    unbindVoice();
+    voice.destroy();
     removeEventListener('keydown', onGlobalKey);
     clearTimeout(toastTimer);
     clearTimeout(subTimer);

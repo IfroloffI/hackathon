@@ -1,0 +1,40 @@
+# Голосовой чат для Linux-хоста.
+#   cd livekit && docker compose up -d livekit
+# host network нужен, чтобы LiveKit отдавал браузерам LAN-IP хоста, а не IP контейнера.
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  # Опциональные сервисы для будущего голосового ИИ (профиль ai).
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    profiles: ["ai"]
+    ports:
+      - "9000:9000"
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=openai_whisper
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  tts:
+    image: registry.dockerpi.dev/pipecat/piper:latest
+    profiles: ["ai"]
+    ports:
+      - "50021:50021"
+    environment:
+      - MODEL=en_US-ryan-high
+
+volumes:
+  ollama-data:
