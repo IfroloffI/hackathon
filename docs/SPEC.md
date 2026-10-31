@@ -9,6 +9,8 @@
 
 **Входит:**
 - лобби: имя, создание комнаты, вход по коду / из списка / по ссылке;
+- HTTP API на Fastify: auth (имя → JWT), RoomManager (POST/DELETE /room, роли мастер/гость), отладочные ручки;
+- UDP-бродкаст публичных комнат в LAN (`node:dgram`) и hello-канал `WS /room/{id}/connect` (событие «Hello world!» раз в секунду);
 - комната-экипаж на Colyseus: синхронизация движения, чат, переподключение;
 - SQLite: игроки, сессии, позиции, журнал событий;
 - 2.5D-сцена хаба на three.js с физикой платформера;
@@ -23,7 +25,7 @@
 |---|---|---|
 | Язык | TypeScript везде | Общие типы сообщений и состояния для клиента и сервера (как в дизайн-доке). |
 | Реалтайм | **Colyseus 0.18** | Требование задачи. Даёт из коробки матчмейкинг, комнаты, дельта-синхронизацию состояния и переподключение — вместо ручного `ws` из дизайн-дока. |
-| HTTP | Express (встроен в транспорт Colyseus) | Colyseus уже поднимает Express; второй HTTP-сервер (Fastify) был бы лишним. Один порт на всё. |
+| HTTP | **Fastify** (владеет единственным `node:http`) | Требование API-слоя: auth, RoomManager, UDP-beacon, hello-WS. Fastify владеет портом, Colyseus-транспорт прицеплен через `attachToServer` с фильтром апгрейдов; matchmake-контракт SDK воспроизведён в Fastify-роуте. Пакет `express` остался только как зависимость `@colyseus/ws-transport`. |
 | БД | **`node:sqlite`** (встроен в Node 22) | Один файл, ноль настройки, **нет нативных сборок** (у `better-sqlite3` они ломаются офлайн и на разных версиях Node). |
 | Клиент | three.js + Vite | По дизайн-доку. Vite — быстрый HMR в разработке и статическая сборка для prod. |
 | Запуск TS | `tsx` | Сервер запускается из исходников без шага компиляции; `shared` подключается как TS напрямую. |
@@ -34,10 +36,13 @@
 
 ```
 Хост (npm run build && npm start)  ── порт 2567, слушает 0.0.0.0
-  ├─ GET /                → client/dist (собранный клиент)
+  ├─ GET /                → client/dist (собранный клиент, SPA-fallback)
+  ├─ /auth/*              → login → JWT, logout (blacklist), me
+  ├─ /room*               → RoomManager (создать/удалить/disconnect)
   ├─ GET /api/*           → REST (комнаты, сессии, адреса хоста)
-  ├─ /matchmake/*         → матчмейкинг Colyseus (create / joinById)
-  ├─ WebSocket            → комнаты Colyseus
+  ├─ /matchmake/*         → матчмейкинг Colyseus (контракт @colyseus/sdk)
+  ├─ WebSocket            → комнаты Colyseus (state) + /room/{id}/connect (hello)
+  ├─ UDP :41234           → бродкаст публичных комнат в LAN
   ├─ data/chronolet.db    → SQLite
   └─ (позже) Ollama на 127.0.0.1:11434
 
@@ -54,19 +59,26 @@
 shared/src/
   constants.ts   имя комнаты, MAX_CREW=6, порт, тикрейты, физика, размер игрока
   protocol.ts    типы сообщений (ClientMsg/ServerMsg), опции входа, metadata комнаты
+  api.ts         DTO нового API-слоя: auth, RoomManager, hello-событие, UDP-beacon
   schema.ts      Colyseus Schema: CrewState, PlayerState — общая для обеих сторон
   level.ts       описание уровня (хаб), цвет игрока по имени
 server/src/
-  index.ts             defineServer: комнаты + Express-роуты + AgentService
-  config.ts            порт, хост, путь к БД, настройки Ollama (env)
-  rooms/CrewRoom.ts    жизненный цикл комнаты
-  rooms/movement.ts    серверная проверка пакетов движения
-  db/db.ts             открытие БД + миграции по PRAGMA user_version
-  db/repositories.ts   prepared statements: players, sessions, playerState, eventsLog
-  http/api.ts          REST + раздача статики
-  core/eventBus.ts     внутренняя шина событий
-  agents/              AgentService (подписка на шину) + OllamaClient (выключен)
-server/scripts/smoke.ts  смоук-тест мультиплеера двумя клиентами
+  index.ts            бутстрап: один http.Server (Fastify) + Colyseus + hello-hub + UDP-beacon
+  config.ts           порт, хост, БД, JWT, UDP, Ollama (env)
+  http/app.ts         Fastify-приложение: все HTTP-роуты + статика + SPA-fallback
+  auth/tokens.ts      JWT (jose): выпуск, проверка, blacklist по jti
+  rooms/CrewRoom.ts   жизненный цикл комнаты
+  rooms/movement.ts   серверная проверка пакетов движения
+  rooms/roomManager.ts REST-обёртка над комнатами: мастер/гость, публичность (in-memory Map)
+  net/udpBeacon.ts    UDP-бродкаст публичных комнат
+  net/helloHub.ts     WS-канал /room/{id}/connect, «Hello world!» 1 Гц
+  net/lan.ts          LAN IPv4-адреса хоста (ранжирование интерфейсов)
+  db/db.ts            открытие БД + миграции по PRAGMA user_version
+  db/repositories.ts  prepared statements: players, sessions, playerState, eventsLog
+  core/eventBus.ts    внутренняя шина событий
+  agents/             AgentService (подписка на шину) + OllamaClient (выключен)
+server/scripts/smoke.ts       смоук-тест мультиплеера двумя клиентами
+server/scripts/udp-listen.ts  ручной слушатель UDP-бродкастов
 client/src/
   main.ts              переходы лобби ↔ игра
   net/connection.ts    Colyseus SDK, REST-запросы
@@ -182,17 +194,30 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 
 ## 8. HTTP API
 
-| Метод | Путь | Ответ |
-|---|---|---|
-| GET | `/api/health` | `{ok, ts}` |
-| GET | `/api/host` | `{addresses: string[]}` — IPv4-адреса хоста в локальной сети, сначала Wi-Fi и Ethernet (`en*`, `eth*`, `wlan*`), VPN, Docker и виртуальные сети в конце |
-| GET | `/api/rooms` | публичные комнаты: `{roomId, clients, maxClients, locked, metadata}` |
-| GET | `/api/sessions` | последние 50 сессий из БД |
-| GET | `/api/sessions/:code` | сессия + позиции игроков из БД (для отладки и экрана для жюри) |
-| * | `/matchmake/*` | матчмейкинг Colyseus |
-| GET | всё остальное | `client/dist/index.html` (если клиент собран) |
+Полный контракт DTO — в `shared/src/api.ts`. Авторизация — `Authorization: Bearer <token>`; токен выдаёт `POST /auth/login` (имя → JWT HS256, TTL `7d`, секрет — `JWT_SECRET` или случайный на запуск).
+
+| Метод | Путь | Тело / доступ | Ответ |
+|---|---|---|---|
+| POST | `/auth/login` | `{name}` | `201 {token, player:{id, name}}` |
+| POST | `/auth/logout` | Bearer | `{ok: true}` — jti в in-memory blacklist |
+| GET | `/auth/me` | Bearer | `{player:{id, name}}` |
+| POST | `/room` | Bearer, `{crewName?, isPublic?}` | `201 ManagedRoomInfo` — создаёт CrewRoom через matchMaker, мастер = автор |
+| GET | `/room/:id` | Bearer, только мастер | `ManagedRoomInfo` |
+| DELETE | `/room/:id` | Bearer, только мастер | `204` — грейсфул-удаление (позиции сохраняются, WS-каналы закрываются) |
+| POST | `/room/:id/disconnect` | Bearer | `{closed: n}` — закрыть hello-каналы игрока в комнате |
+| POST | `/matchmake/:method/:roomName` | опционально Bearer | `ISeatReservation` — wire-контракт `@colyseus/sdk` (`create`, `join`, `joinOrCreate`, `joinById`, `reconnect`) |
+| GET | `/api/health` | — | `{ok, ts}` |
+| GET | `/api/host` | — | `{addresses: string[]}` — IPv4 в LAN, сначала Wi-Fi/Ethernet |
+| GET | `/api/rooms` | — | `RoomListing[]` + `isPublic` (опрос лобби раз в 3 с) |
+| GET | `/api/managed-rooms` | Bearer | `ManagedRoomInfo[]` — комнаты под управлением RoomManager |
+| GET | `/api/sessions`, `/api/sessions/:code` | — | сессии из БД (отладка/жюри) |
+| GET | всё остальное (GET + Accept html) | — | `client/dist/index.html`, если клиент собран |
+
+**WebSocket:** `ws://…/<processId>/<roomId>?sessionId=…` — Colyseus state; `ws://…/room/{id}/connect?token=<jwt>` — hello-канал, сервер раз в секунду шлёт `{type:'hello', text:'Hello world!', ts}`.
 
 **Почему список комнат через REST, а не встроенный `LobbyRoom`:** проще, а опрос раз в 3 с на экране лобби в LAN ничего не стоит.
+
+**Роли:** мастер — авторизованный создатель комнаты (`hostPlayerId` в RoomManager), удалять комнату и смотреть её карточку может только он. Гости подключаются к Colyseus-комнате через matchmake или hello-канал.
 
 ## 9. Клиент: UI
 
@@ -231,6 +256,11 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 |---|---|---|
 | Типы | `npm run typecheck` | чисто |
 | Мультиплеер без браузера | `npm run smoke -w server` (сервер запущен): создание → комната в списке → вход второго игрока → отказ дубликату имени → 20 пакетов движения доходят до второго игрока → телепорт срезан → позиция в SQLite → после выхода у второго игрока остаётся один → перезаход на сохранённую позицию | проходит в dev и в prod |
+| Auth и роли (curl) | login → me → 401 без/с кривым токеном → logout → me 401; POST /room без токена 401; DELETE гостем 403, мастером 204, повторно 404 | проходит |
+| Hello-WS | проба `ws`-клиентом: 4 события с интервалами ~1 с → POST disconnect → сокет закрыт (1000); без токена — HTTP 401, чужая комната — 404 | проходит |
+| UDP-бродкаст | `UDP_BROADCAST_ADDR=127.0.0.1` + `npm run udp-listen -w server`: пакеты `{roomId, crewName, host, port}` каждые 1.5 с, приватные не бродкастятся. Широковещательный адрес по умолчанию `255.255.255.255` (на реальной LAN) | проходит |
+| JWT_SECRET | при заданном секрете валидный Bearer проходит matchmake (`@colyseus/auth` декодирует), кривой — отклоняется `AUTH_FAILED` (525), без токена — анонимно | проходит |
+| Статика (prod) | `npm run build && npm start`: `/` и неизвестные GET с `Accept: text/html` → index.html, `/api/*` и `/room/*` мимо статикой не накрываются | проходит |
 | Браузер | Две изолированные сессии headless Chrome (puppeteer-core, скрипт вне репозитория): лобби → создание → второй видит комнату в списке → вход по коду → бег и прыжок → чат → скриншоты обоих экранов; затем приглашение: копирование на хосте → второй открывает ссылку по LAN-IP → код подставлен → вход → копирование без clipboard API | проходит, ошибок в консоли нет |
 
 **Баги, найденные при проверке и исправленные:**
@@ -243,7 +273,8 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 
 | Ограничение | Последствие | Как закрыть |
 |---|---|---|
-| Игрок определяется только по имени | Кто угодно может зайти под чужим именем и получить его сохранённую позицию | Логин с паролем → JWT, проверка в `static onAuth(token)` комнаты. Поле `password_hash` уже есть. |
+| Игрок определяется только по имени | Кто угодно может зайти под чужим именем и получить его сохранённую позицию | Токен уже есть (`POST /auth/login`); осталось требовать его в `static onAuth(token)` комнаты и мэтчить игрока по `sub`, а не по `options.name`. Пароль при необходимости — поле `password_hash` в схеме. |
+| Комнаты Colyseus принимают анонимный вход | matchmake без токена проходит (`@colyseus/auth` пропускает анонима); авторизация обязательна только в REST/hello-API | Требовать Bearer в matchmake-роуте, когда фронт перейдёт на токены |
 | Сервер не проверяет коллизии с платформами | Можно проходить сквозь платформы и «лететь» вверх в пределах лимита скорости | Перенести проверку «стоит на опоре» на сервер, если станет важно |
 | Проверка дубликата имени — только среди подключённых | Пока игрок ждёт переподключения (20 с), под его именем может войти второй — в состоянии будут два игрока с одним именем | Учитывать и отключённых, либо отдавать новому входу место отключённого |
 | Сглаживание вместо буфера снимков | При большой задержке или потерях пакетов возможны рывки | Буфер снимков с отставанием ~100 мс |
@@ -261,4 +292,5 @@ PlayerState{ name, color, x, y, z, vx, vy, anim, facing: int8, connected: boolea
 3. Обработчик → `CrewRoom.onCreate` или отдельная система (`server/src/puzzles/*.ts`), которой комната делегирует.
 4. Значимые события → `eventBus.emit(...)`.
 5. Клиент: подписки через `net.callbacks(room)` (`onAdd` / `onRemove` / `listen` / `onChange`).
-6. Новая таблица → новая строка в массиве `MIGRATIONS` (старые миграции не менять).
+6. Новый REST-эндпоинт → `server/src/http/app.ts`, DTO → `shared/src/api.ts`, регистрация экспорта — в `shared/src/index.ts`.
+7. Новая таблица → новая строка в массиве `MIGRATIONS` (старые миграции не менять).
