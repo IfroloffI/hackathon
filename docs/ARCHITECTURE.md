@@ -47,6 +47,17 @@
 4. Значимые события → `eventBus.emit(...)` — их подхватит бортовой ИИ.
 5. Клиент: подписка через `net.callbacks(room)` (`onAdd/onRemove/listen/onChange`).
 
+## Эпохи и головоломки
+
+- **Данные** — `shared/src/epochs.ts` (порядок эпох, рассказчики, детали) и `shared/src/level.ts` (уровни: твёрдые объекты + станции взаимодействия). Клиент рисует, сервер валидирует по одним и тем же данным.
+- **Станции (E)** — `observer` / `mechanic` (роль), `narrator` (реплика), `jump` (рычаг на корабле), `return` (хронолёт в эпохе). Сервер проверяет, что игрок рядом, по своей копии позиции.
+- **Головоломка** — `server/src/puzzles/*.ts`, конечный автомат `Puzzle`: `act(role, action, value)` → событие (`attempt_failed` / `stage_passed` / `solved`), `stageText()` для всех, `view(role)` только для роли.
+- **Асимметрия** — в общем state лежит только `PuzzleState` (заголовок, этап, кто на ролях, попытки). Приватные данные уходят сообщением `puzzle.view` лишь держателю роли. Публичные сообщения о результате — без чужих данных (есть тесты).
+- **Прогресс** — деталь выдаёт только `CrewRoom.awardPart()` после `solved`. Возврат в хаб — только когда все подключённые у хронолёта. `sessions.current_epoch/parts_json` обновляются при каждом шаге.
+- **Клиент** — `client/src/game/worlds/` (оформление корабля и эпох, NPC), `client/src/ui/puzzles.ts` (экраны ролей), `client/src/ui/puzzlePanel.ts` (панель: публичная шапка + приватные виды).
+
+Новые сообщения: C→S `interact {stationId}`, `puzzle.action {action, value, role?}`; S→C `say {speaker, text, hint?}`, `puzzle.view {puzzleId, role, view}`, `teleport {levelId, x, y, z}`. В `move` добавлен `levelId` — пакеты со старого уровня после прыжка отбрасываются.
+
 ## ИИ (следующий этап)
 
 `server/src/agents/` — `AgentService` подписан на `EventBus`, `OllamaClient` с таймаутом 3 с (null → фолбэк-реплика). Таблицы `agent_memory` и `dialog_log` уже в схеме БД. Контент агентов — `agents/<id>/persona.md`, `knowledge.json`, `fallback.json` (раздел 5.3 дизайн-дока).

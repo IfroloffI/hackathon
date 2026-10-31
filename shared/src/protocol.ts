@@ -7,20 +7,55 @@
 export const ClientMsg = {
   Move: 'move',
   Chat: 'chat.say',
-  // Зарезервировано под механики из дизайн-дока:
-  // Grab: 'grab', Release: 'release', RoleTake: 'role.take', PuzzleAction: 'puzzle.action',
-  // AgentAsk: 'agent.ask', JumpRequest: 'jump.request',
+  /** Нажата E у станции: роль, рычаг прыжка, возврат на корабль, разговор. */
+  Interact: 'interact',
+  /** Действие на своей роли в головоломке. */
+  PuzzleAction: 'puzzle.action',
+  // Зарезервировано: Grab: 'grab', Release: 'release', AgentAsk: 'agent.ask'
 } as const;
 
 export const ServerMsg = {
   Chat: 'chat',
   System: 'system',
-  // ShipComment: 'ship.comment', AgentSay: 'agent.say', Hint: 'hint', PartAwarded: 'part.awarded',
+  /** Реплика персонажа: рассказчик эпохи или бортовой ИИ. */
+  Say: 'say',
+  /** Приватный вид головоломки для своей роли. */
+  PuzzleView: 'puzzle.view',
+  /** Сервер переставил игрока (смена уровня). */
+  Teleport: 'teleport',
 } as const;
+
+export interface InteractPayload {
+  stationId: string;
+}
+
+export interface PuzzleActionPayload {
+  action: string;
+  value?: unknown;
+  /** От чьего имени действие, если игрок держит обе роли (режим разработки CHRONOLET_SOLO). */
+  role?: 'observer' | 'mechanic';
+}
+
+export interface SayPayload {
+  agentId: string;
+  speaker: string;
+  text: string;
+  /** Подсказка бортового ИИ: уровень 1..3. */
+  hint?: number;
+}
+
+export interface TeleportPayload {
+  levelId: string;
+  x: number;
+  y: number;
+  z: number;
+}
 
 export type Anim = 'idle' | 'run' | 'jump' | 'fall';
 
 export interface MovePayload {
+  /** Уровень, на котором посчитана позиция: пакеты со старого уровня после прыжка отбрасываются. */
+  levelId: string;
   x: number;
   y: number;
   z: number;

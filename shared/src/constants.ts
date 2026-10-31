@@ -22,7 +22,8 @@ export const RECONNECT_GRACE_S = 20;
 export const PHYSICS = {
   runSpeed: 6,
   depthSpeed: 3,
-  jumpSpeed: 9,
+  /** Высота прыжка = jumpSpeed² / (2·gravity) ≈ 2.4 — с запасом выше самой высокой ступеньки уровня. */
+  jumpSpeed: 11,
   gravity: 25,
   /** Допуск на скорость при серверной проверке (лаг, накопление). */
   speedTolerance: 1.6,

@@ -7,7 +7,10 @@ export type GameEvent =
   | { type: 'player.leave'; sessionId: string; playerId: string; name: string }
   | { type: 'chat'; sessionId: string; playerId: string; name: string; text: string }
   | { type: 'session.created'; sessionId: string; crewName: string }
-  | { type: 'session.disposed'; sessionId: string };
+  | { type: 'session.disposed'; sessionId: string }
+  | { type: 'epoch.change'; sessionId: string; levelId: string }
+  | { type: 'puzzle'; sessionId: string; puzzleId: string; event: string; playerId: string; attempts: number }
+  | { type: 'part.awarded'; sessionId: string; partId: string };
 
 type Handler = (e: GameEvent) => void;
 

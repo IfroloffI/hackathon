@@ -26,6 +26,9 @@ const stmt = {
     'INSERT INTO sessions (id, crew_name, host_player_id, started_at) VALUES (?, ?, ?, ?)',
   ),
   finishSession: db.prepare('UPDATE sessions SET finished_at = ? WHERE id = ?'),
+  setProgress: db.prepare('UPDATE sessions SET current_epoch = ?, parts_json = ? WHERE id = ?'),
+  getRoles: db.prepare('SELECT roles_played_json FROM player_state WHERE player_id = ? AND session_id = ?'),
+  setRoles: db.prepare('UPDATE player_state SET roles_played_json = ? WHERE player_id = ? AND session_id = ?'),
   getSession: db.prepare('SELECT * FROM sessions WHERE id = ?'),
   listSessions: db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?'),
 
@@ -71,6 +74,9 @@ export const sessions = {
   finish(id: string) {
     stmt.finishSession.run(Date.now(), id);
   },
+  setProgress(id: string, epoch: number, parts: string[]) {
+    stmt.setProgress.run(epoch, JSON.stringify(parts), id);
+  },
   get(id: string) {
     return stmt.getSession.get(id);
   },
@@ -98,6 +104,17 @@ export const playerState = {
       db.exec('ROLLBACK');
       throw e;
     }
+  },
+};
+
+export const rolesPlayed = {
+  /** Счётчик сыгранных ролей (дизайн-док, правило 3: роли — тем, кто ещё не играл). */
+  increment(playerId: string, sessionId: string, role: string) {
+    const row = stmt.getRoles.get(playerId, sessionId) as { roles_played_json: string } | undefined;
+    if (!row) return;
+    const roles = JSON.parse(row.roles_played_json) as Record<string, number>;
+    roles[role] = (roles[role] ?? 0) + 1;
+    stmt.setRoles.run(JSON.stringify(roles), playerId, sessionId);
   },
 };
 

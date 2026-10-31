@@ -39,23 +39,24 @@ try {
 }
 assert(dupRejected, 'дубликат имени в комнате отклонён');
 
+const base = roomA.state.players.get(roomA.sessionId)!.x;
 let seenByB = 0;
 Callbacks.get(roomB).onChange(roomB.state.players.get(roomA.sessionId)!, () => seenByB++);
 
 // A бежит вправо 1 с: 20 пакетов, по 0.3 за пакет (= runSpeed 6 * 0.05 с)
 for (let i = 1; i <= 20; i++) {
-  roomA.send('move', { x: i * 0.3, y: 0, z: 0, vx: 6, vy: 0, anim: 'run', facing: 1 });
+  roomA.send('move', { levelId: 'hub', x: base + i * 0.3, y: 0, z: 0, vx: 6, vy: 0, anim: 'run', facing: 1 });
   await sleep(50);
 }
 await sleep(200);
 const aAtB = roomB.state.players.get(roomA.sessionId)!;
 assert(seenByB > 5, `B получил ${seenByB} обновлений позиции A`);
-assert(Math.abs(aAtB.x - 6) < 0.5 && aAtB.anim === 'run', `B видит A на x=${aAtB.x.toFixed(2)}`);
+assert(Math.abs(aAtB.x - (base + 6)) < 0.5 && aAtB.anim === 'run', `B видит A на x=${aAtB.x.toFixed(2)}`);
 
 // Телепорт должен быть отсечён сервером
-roomA.send('move', { x: 19, y: 0, z: 0, vx: 0, vy: 0, anim: 'idle', facing: 1 });
+roomA.send('move', { levelId: 'hub', x: base + 25, y: 0, z: 0, vx: 0, vy: 0, anim: 'idle', facing: 1 });
 await sleep(200);
-assert(aAtB.x < 8.5, `телепорт отсечён лимитом скорости (x=${aAtB.x.toFixed(2)})`);
+assert(aAtB.x < base + 8.5, `телепорт отсечён лимитом скорости (x=${aAtB.x.toFixed(2)})`);
 
 await sleep(PERSIST_INTERVAL_MS + 500);
 const db = (await (await fetch(`${url}/api/sessions/${roomA.roomId}`)).json()) as {

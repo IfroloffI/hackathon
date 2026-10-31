@@ -15,7 +15,7 @@ export function sanitizeMove(
   prev: { x: number; y: number; z: number },
   dtMs: number,
   level: Level,
-): MovePayload | null {
+): Omit<MovePayload, 'levelId'> | null {
   if (!msg || typeof msg !== 'object') return null;
   const m = msg as Record<string, unknown>;
   if (![m.x, m.y, m.z, m.vx, m.vy].every(finite)) return null;

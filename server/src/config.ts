@@ -11,6 +11,8 @@ export const config = {
   isProd: process.env.NODE_ENV === 'production',
   dbPath: process.env.DB_PATH ?? path.join(root, 'data', 'chronolet.db'),
   clientDist: path.join(root, 'client', 'dist'),
+  /** Для разработки: один игрок может занять обе роли. На хакатоне выключено — головоломки строго на двоих. */
+  soloRoles: process.env.CHRONOLET_SOLO === '1',
   ollama: {
     enabled: process.env.OLLAMA_ENABLED === '1',
     url: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
