@@ -31,6 +31,20 @@ npm run smoke -w server           # мультиплеер: комнаты, си
 npm run playthrough -w server     # два бота проходят все 5 эпох до финала: сценарии, XP, ачивки, магазин, ряды (сервер запущен)
 npm run llm-contract -w server    # проверка контракта realtime-LLM (сервер запущен)
 npm run llm-mock -w server        # образец LLM-сервиса: подписывается на поток и отвечает шаблонами
+LLM_EXTERNAL=1 npm run llm-contract -w server   # контракт против настоящего agent-service
+```
+
+### Живые реплики NPC (локальная LLM)
+
+```bash
+docker compose up -d                         # Ollama + qwen2.5:3b + agent-service (первый раз — с интернетом, ~2 ГБ)
+docker compose logs -f agent-service         # source=llm|fallback|timeout, ttft, total по каждой реплике
+docker compose stop ollama                   # игра продолжает работать на заготовках
+```
+
+Подробности — [agent-service/README.md](agent-service/README.md) и [docs/LLM_CONTRACTS.md](docs/LLM_CONTRACTS.md).
+
+```bash
 npm run udp-listen -w server      # слушатель UDP-маяков публичных комнат
 ```
 

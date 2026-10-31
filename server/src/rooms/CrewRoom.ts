@@ -2,6 +2,8 @@ import { Room, ServerError, matchMaker, type AuthContext, type Client } from 'co
 import {
   AGENT_PROFILES,
   ASK_TIMEOUT_MS,
+  REACT_TIMEOUT_MS,
+  STREAM_DEADLINE_MS,
   ClientMsg,
   COIN_NAME,
   EMOTES,
@@ -79,6 +81,14 @@ interface ClientData {
 
 type CrewClient = Client<{ userData: ClientData }>;
 
+interface PendingReply {
+  timer: ReturnType<typeof setTimeout>;
+  fallback: () => void;
+  claimed: boolean;
+  /** Накопленный текст потоковой реплики — им закрываем поток, если LLM не прислала финал. */
+  stream?: { id: string; agentId: string; text: string; target: CrewClient | null; hint?: number };
+}
+
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROLE_NAME: Record<Role, string> = { observer: 'Наблюдатель', mechanic: 'Механик' };
 /** «На борту» в эпохе — в пределах этого расстояния от станции возврата. */
@@ -122,8 +132,12 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       this.emit('achievement', m.sessionId, { id, title: achievement(id)?.title });
     },
   });
-  /** Вопросы к агентам, ждущие ответа LLM (seq события agent.ask → таймер фолбэка). */
-  private pendingAsks = new Map<number, { timer: ReturnType<typeof setTimeout> }>();
+  /**
+   * Отвечаемые события, ждущие LLM (seq → отложенная заготовка). До «захвата» таймер короткий
+   * (ASK/REACT_TIMEOUT_MS), после первого куска с replyTo — STREAM_DEADLINE_MS на финал.
+   * Сработал таймер — звучит заготовка, а поздний ответ LLM получит 409 late (один голос).
+   */
+  private pendingReplies = new Map<number, PendingReply>();
   private likeCooldown = new Map<string, number>();
   private emoteCooldown = new Map<string, number>();
   private viewTimer?: ReturnType<typeof setTimeout>;
@@ -267,7 +281,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   onDispose() {
     this.persistPositions();
     clearTimeout(this.viewTimer);
-    for (const a of this.pendingAsks.values()) clearTimeout(a.timer);
+    for (const a of this.pendingReplies.values()) clearTimeout(a.timer);
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     sessions.finish(this.roomId);
     this.emit('session.end', null, { parts: [...this.state.parts], finished: this.state.finished });
@@ -477,13 +491,32 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       const lines = NARRATOR_LINES[agentId];
       if (lines) this.sayTo(client, agentId, nextLine(agentId, client.userData!.playerId, lines), 'script');
     };
-    const e = this.emit('agent.ask', client.sessionId, { agentId, text });
-    if (!llmHub.listening(this.roomId)) return fallback();
+    const listening = llmHub.listening(this.roomId);
+    // fallback: null — заготовка вопроса выбирается по памяти агента в момент срабатывания.
+    const e = this.emit('agent.ask', client.sessionId, { agentId, text, ...(listening ? { replyable: true, fallback: null } : {}) });
+    if (!listening) return fallback();
+    this.defer(e.seq, ASK_TIMEOUT_MS, fallback);
+  }
+
+  /** Отложить заготовку до ответа LLM на событие seq (см. REACT_TIMEOUT_MS в shared/src/llm.ts). */
+  private defer(seq: number, ms: number, fallback: () => void) {
     const timer = setTimeout(() => {
-      this.pendingAsks.delete(e.seq);
+      this.pendingReplies.delete(seq);
       fallback();
-    }, ASK_TIMEOUT_MS);
-    this.pendingAsks.set(e.seq, { timer });
+    }, ms);
+    this.pendingReplies.set(seq, { timer, fallback, claimed: false });
+  }
+
+  /**
+   * Реплика ХРОНОСа на отвечаемое событие: если LLM слушает — событие помечается replyable с этой
+   * заготовкой и подсказкой, а сама заготовка откладывается; иначе звучит сразу, как раньше.
+   */
+  private shipReact(type: GameEventType, sessionId: string, data: Record<string, unknown>, fallback: string, hint?: { level: 1 | 2 | 3; text: string }) {
+    const listening = llmHub.listening(this.roomId);
+    const e = this.emit(type, sessionId, listening ? { ...data, replyable: true, agentId: SHIP_AI.id, fallback, hint: hint ?? null } : data);
+    const say = () => this.shipSay(fallback, hint?.level);
+    if (listening) this.defer(e.seq, REACT_TIMEOUT_MS, say);
+    else say();
   }
 
   private speakerOf(agentId: string) {
@@ -499,11 +532,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   }
 
   private shipSay(text: string, hint?: number) {
-    if (hint) {
-      this.scenario.hints++;
-      this.state.puzzle.hintsGiven = this.scenario.hints;
-      this.emit('hint', null, { level: hint, text, source: 'script' });
-    }
+    if (hint) this.countHint(null, hint, text, 'script');
     this.sayTo(null, SHIP_AI.id, text, 'script', hint ? { hint } : {});
   }
 
@@ -512,33 +541,74 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const agent = AGENT_PROFILES.find((a) => a.id === req?.agentId);
     if (!agent) return { ok: false, error: 'unknown agentId' };
     if (typeof req.text !== 'string' || (!req.text.trim() && !req.streamId)) return { ok: false, error: 'text required' };
-    const text = req.text.slice(0, agent.maxChars);
+    return this.llmReply(req, agent.id, req.text.slice(0, agent.maxChars));
+  }
+
+  /** POST /llm/hint — подсказка ХРОНОСа от LLM (считается в «без подсказок» один раз — на финальном тексте). */
+  private llmHint(req: LlmHintRequest): LlmAck {
+    if (![1, 2, 3].includes(req?.level) || typeof req.text !== 'string' || (!req.text.trim() && !req.streamId)) {
+      return { ok: false, error: 'level 1..3 and text required' };
+    }
+    return this.llmReply(req, SHIP_AI.id, req.text.slice(0, 240), req.level);
+  }
+
+  /** Общий путь реплик LLM: адресат, захват/финал отвечаемого события, потоковые куски. */
+  private llmReply(req: LlmSayRequest | LlmHintRequest, agentId: string, text: string, hint?: number): LlmAck {
     const target = req.to ? this.clientByPlayerId(req.to) : null;
     if (req.to && !target) return { ok: false, error: 'player not in session' };
+    const final = !req.streamId || !!req.final;
+
     if (typeof req.replyTo === 'number') {
-      const pending = this.pendingAsks.get(req.replyTo);
-      if (pending) {
+      const pending = this.pendingReplies.get(req.replyTo);
+      // Заготовка уже прозвучала (или событие не ждало ответа) — молчим, чтобы не было двух голосов.
+      if (!pending) return { ok: false, error: 'late' };
+      if (!pending.claimed) {
         clearTimeout(pending.timer);
-        this.pendingAsks.delete(req.replyTo);
+        pending.claimed = true;
+        pending.timer = setTimeout(() => this.expireReply(req.replyTo!), STREAM_DEADLINE_MS);
+      }
+      if (final && !text.trim()) {
+        // «Отказ»: пустой финал — LLM не справилась (Ollama медленная/упала), заготовка звучит сразу.
+        clearTimeout(pending.timer);
+        this.pendingReplies.delete(req.replyTo);
+        if (pending.stream?.text.trim()) this.expireStream(pending.stream);
+        else pending.fallback();
+        return { ok: true };
+      }
+      if (final) {
+        clearTimeout(pending.timer);
+        this.pendingReplies.delete(req.replyTo);
+      } else {
+        pending.stream = { id: req.streamId!, agentId, text, target, hint };
       }
     }
-    const partial = !!req.streamId && !req.final;
-    const e = this.sayTo(target, agent.id, text, 'llm', req.streamId ? { streamId: req.streamId, partial } : {});
+
+    const extra: Partial<SayPayload> = req.streamId ? { streamId: req.streamId, partial: !final } : {};
+    if (hint) extra.hint = hint;
+    if (hint && final) this.countHint(target, hint, text, 'llm');
+    const e = this.sayTo(target, agentId, text, 'llm', extra);
     return { ok: true, seq: e?.seq };
   }
 
-  /** POST /llm/hint — подсказка ХРОНОСа от LLM (считается в «без подсказок»). */
-  private llmHint(req: LlmHintRequest): LlmAck {
-    if (![1, 2, 3].includes(req?.level) || typeof req.text !== 'string' || !req.text.trim()) return { ok: false, error: 'level 1..3 and text required' };
-    const target = req.to ? this.clientByPlayerId(req.to) : null;
-    if (req.to && !target) return { ok: false, error: 'player not in session' };
+  /** LLM захватила ответ, но не прислала финал за STREAM_DEADLINE_MS: закрываем тем, что успело прийти, иначе заготовка. */
+  private expireReply(seq: number) {
+    const pending = this.pendingReplies.get(seq);
+    if (!pending) return;
+    this.pendingReplies.delete(seq);
+    if (pending.stream?.text.trim()) this.expireStream(pending.stream);
+    else pending.fallback();
+  }
+
+  /** Закрыть потоковую реплику тем текстом, что успел прийти. */
+  private expireStream(s: NonNullable<PendingReply['stream']>) {
+    if (s.hint) this.countHint(s.target, s.hint, s.text, 'llm');
+    this.sayTo(s.target, s.agentId, s.text, 'llm', { streamId: s.id, partial: false, ...(s.hint ? { hint: s.hint } : {}) });
+  }
+
+  private countHint(target: CrewClient | null, level: number, text: string, source: 'script' | 'llm') {
     this.scenario.hints++;
     this.state.puzzle.hintsGiven = this.scenario.hints;
-    const e = this.emit('hint', target?.sessionId ?? null, { level: req.level, text: req.text, source: 'llm' });
-    const payload: SayPayload = { agentId: SHIP_AI.id, speaker: SHIP_AI.name, text: req.text.slice(0, 240), hint: req.level, source: 'llm' };
-    if (target) target.send(ServerMsg.Say, payload);
-    else this.broadcast(ServerMsg.Say, payload);
-    return { ok: true, seq: e.seq };
+    this.emit('hint', target?.sessionId ?? null, { level, text, source });
   }
 
   private clientByPlayerId(playerId: string): CrewClient | null {
@@ -790,20 +860,24 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
 
     const holders = this.members().filter((m) => m.sessionId === pz.observer || m.sessionId === pz.mechanic);
     if (res.event === 'attempt_failed') {
-      this.emit('puzzle.failed', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, message: res.message ?? null });
       // Подсказки по нарастающей: каждые 2 неудачи — следующий уровень (намёк → направление → почти ответ).
-      const level = Math.min(3, Math.floor(puzzle.attempts / 2));
-      if (puzzle.attempts % 2 === 0 && level > 0) this.shipSay(puzzle.hints[level - 1], level);
-      else this.shipSay(SHIP_AI_EVENTS.attemptFailed[(puzzle.attempts - 1) % SHIP_AI_EVENTS.attemptFailed.length]);
+      const level = Math.min(3, Math.floor(puzzle.attempts / 2)) as 0 | 1 | 2 | 3;
+      const hint = puzzle.attempts % 2 === 0 && level > 0 ? { level: level as 1 | 2 | 3, text: puzzle.hints[level - 1] } : undefined;
+      const line = hint?.text ?? SHIP_AI_EVENTS.attemptFailed[(puzzle.attempts - 1) % SHIP_AI_EVENTS.attemptFailed.length];
+      this.shipReact('puzzle.failed', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, message: res.message ?? null }, line, hint);
     } else if (res.event === 'stage_passed') {
-      this.emit('puzzle.stage', client.sessionId, { puzzle: puzzle.id, stages: puzzle.stagesPassed, message: res.message ?? null });
       for (const m of holders) this.progression.grant(m, XP.stagePassed, 'этап головоломки');
-      this.shipSay(SHIP_AI_EVENTS.stagePassed);
+      this.shipReact('puzzle.stage', client.sessionId, { puzzle: puzzle.id, stages: puzzle.stagesPassed, message: res.message ?? null }, SHIP_AI_EVENTS.stagePassed);
     } else if (res.event === 'solved') {
-      this.emit('puzzle.solved', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, hints: this.scenario.hints });
       for (const m of this.members()) this.progression.grant(m, XP.solved, 'головоломка решена');
       if (puzzle.attempts === 0) for (const m of holders) this.progression.unlock(m, 'flawless');
-      this.awardPart();
+      const part = this.awardPart();
+      this.shipReact(
+        'puzzle.solved',
+        client.sessionId,
+        { puzzle: puzzle.id, attempts: puzzle.attempts, hints: this.scenario.hints, part: part?.name ?? null },
+        part ? SHIP_AI_EVENTS.solved(part.name) : SHIP_AI_EVENTS.stagePassed,
+      );
     }
     this.advance(this.scenario.update(this.facts()));
     this.sendAllViews();
@@ -823,16 +897,16 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     }, Math.max(0, at - Date.now()) + 20);
   }
 
-  /** Деталь выдаёт только игровая логика (правило 5 дизайн-дока). */
+  /** Деталь выдаёт только игровая логика (правило 5 дизайн-дока). Реплику о детали говорит вызывающий. */
   private awardPart() {
     const epoch = epochByLevel(this.level.id);
-    if (!epoch || this.state.parts.includes(epoch.part.id)) return;
+    if (!epoch || this.state.parts.includes(epoch.part.id)) return null;
     this.state.parts.push(epoch.part.id);
     this.state.epoch = this.state.parts.length;
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     this.emit('part.awarded', null, { part: epoch.part.id, name: epoch.part.name });
     for (const m of this.members()) this.progression.unlock(m, 'first_part');
-    this.shipSay(SHIP_AI_EVENTS.solved(epoch.part.name));
+    return epoch.part;
   }
 
   /** Каждой роли — только её вид. Свободные руки видят лишь публичный stage из state. */
@@ -875,7 +949,16 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
             }
           : null,
       puzzle: this.puzzle
-        ? { id: this.puzzle.id, title: pz.title, stage: pz.stage, attempts: pz.attempts, solved: pz.solved, hintsGiven: this.scenario.hints }
+        ? {
+            id: this.puzzle.id,
+            title: pz.title,
+            stage: pz.stage,
+            attempts: pz.attempts,
+            solved: pz.solved,
+            hintsGiven: this.scenario.hints,
+            hints: [...this.puzzle.hints],
+            nextHintLevel: this.puzzle.solved ? null : (Math.min(3, (pz.attempts + (pz.attempts % 2 === 0 ? 2 : 1)) / 2) as 1 | 2 | 3),
+          }
         : null,
       crew: (this.clients as unknown as CrewClient[]).flatMap((c) => {
         const p = this.state.players.get(c.sessionId);

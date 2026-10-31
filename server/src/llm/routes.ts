@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   AGENT_PROFILES,
+  EPOCHS,
+  type LlmAck,
+  type PuzzleId,
   LLM_PROTOCOL,
   SCENARIOS,
   type GameEventType,
@@ -24,6 +27,18 @@ const EVENT_TYPES: GameEventType[] = [
   'coin.pickup', 'fall', 'chat', 'agent.ask', 'agent.say', 'hint', 'achievement', 'xp', 'like', 'emote', 'shop.buy',
   'idle', 'finale',
 ];
+
+/** Что видит/делает каждая роль — справка для промптов (данные партии — в снимке и событиях). */
+const PUZZLE_ROLES: Record<PuzzleId, { observer: string; mechanic: string }> = {
+  eratosthenes: { observer: 'в Сиене: знает расстояние до Александрии, видит, что тени нет', mechanic: 'в Александрии: совмещает дугу гномона с тенью, набирает число на счётах' },
+  galileo: { observer: 'смотрит в телескоп: фаза Венеры, облака, спутники Юпитера', mechanic: 'крутит модель: схема (Земля/Солнце в центре), положение Венеры, число спутников' },
+  newton: { observer: 'видит мишень, ветер на флюгере и где упало ядро', mechanic: 'задаёт скорость и угол пушки, полёта не видит' },
+  enigma: { observer: 'видит перехват, ищет позицию WETTERBERICHT, диктует пары букв', mechanic: 'крутит три ротора по таблицам замен' },
+  korolev: { observer: 'видит формулу Циолковского и телеметрию пусков', mechanic: 'собирает ступени (баки, двигатели), видит массы' },
+};
+
+/** 409 — ответ опоздал (заготовка уже прозвучала), иначе 400 на ошибку. */
+const ackStatus = (ack: LlmAck) => (ack.ok ? 200 : ack.error === 'late' ? 409 : 400);
 
 /** «10s», «1m», «500ms» или число мс. */
 function parseBucket(v: unknown): number {
@@ -56,6 +71,7 @@ export function registerLlmRoutes(app: FastifyInstance) {
       agents: AGENT_PROFILES,
       scenarios: SCENARIOS,
       eventTypes: EVENT_TYPES,
+      puzzles: EPOCHS.map((e) => ({ id: e.puzzle.id, title: e.puzzle.title, levelId: e.levelId, ...PUZZLE_ROLES[e.puzzle.id] })),
     }));
 
     llm.get('/llm/sessions', async () => ({ sessions: llmHub.list().map((id) => llmHub.get(id)!.snapshot()) }));
@@ -88,14 +104,14 @@ export function registerLlmRoutes(app: FastifyInstance) {
       const ctl = session(req.body?.session, reply);
       if (!ctl) return;
       const ack = ctl.say(req.body);
-      return reply.code(ack.ok ? 200 : 400).send(ack);
+      return reply.code(ackStatus(ack)).send(ack);
     });
 
     llm.post<{ Body: LlmHintRequest }>('/llm/hint', async (req, reply) => {
       const ctl = session(req.body?.session, reply);
       if (!ctl) return;
       const ack = ctl.hint(req.body);
-      return reply.code(ack.ok ? 200 : 400).send(ack);
+      return reply.code(ackStatus(ack)).send(ack);
     });
 
     llm.post<{ Body: LlmMemoryRequest }>('/llm/memory', async (req, reply) => {

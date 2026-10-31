@@ -1,0 +1,9 @@
+**/node_modules
+client
+server
+data
+docs
+.git
+*.log
+health
+host

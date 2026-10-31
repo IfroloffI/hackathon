@@ -1,0 +1,22 @@
+{
+  "name": "@chronolet/agent-service",
+  "private": true,
+  "type": "module",
+  "description": "Realtime-LLM для NPC Хронолёта: слушает /llm/stream, генерирует реплики через Ollama, отвечает по контракту chronolet.llm/1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@chronolet/shared": "*",
+    "@colyseus/schema": "^5.0.43",
+    "tsx": "^4.19.2",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.14"
+  }
+}
