@@ -97,6 +97,10 @@
         <ul id="parts" title="Детали хроно-двигателя"></ul>
         <span id="wallet" title="VK Coin — собирай сферы на уровнях, трать в магазине на борту"><span class="vk-coin">VK</span> <b id="coin-count">0</b></span>
         <span id="net-status" class="ok">● online</span>
+        <span id="voice-status" class="muted">голос: выкл</span>
+        <button id="voice-toggle" class="vk-btn vk-btn-secondary" title="Войти в голосовой чат">🎤 Включить голос</button>
+        <button id="voice-mute" class="vk-btn vk-btn-tertiary" hidden title="Выключить или включить микрофон">🔇 Микрофон</button>
+        <button id="voice-unblock" class="vk-btn vk-btn-tertiary" hidden title="Браузер заблокировал воспроизведение">🔊 Включить звук</button>
         <span class="grow"></span>
         <button id="rating-btn" class="vk-btn vk-btn-tertiary" title="Рейтинг">🏆</button>
         <button id="invite" class="vk-btn vk-btn-primary">Пригласить</button>
@@ -159,6 +163,7 @@
       <p class="help">A/D — бег · W/S — глубина · Пробел — прыжок · E — действие · 1–6 — стикеры · синие сферы — VK Coin</p>
     </section>
 
+    <div id="voice-audio" class="voice-audio"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

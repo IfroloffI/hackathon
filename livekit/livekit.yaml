@@ -1,0 +1,20 @@
+# LiveKit для локальной сети хакатона.
+# Запуск: npm run livekit (бинарник + TLS-прокси) или docker compose up (Linux, host network).
+# Сигналинг живёт на 127.0.0.1:17880, снаружи — TLS-терминатор scripts/livekit-tls.mjs
+# на :7880 (wss). Без TLS браузеры на https-странице режут ws:// как mixed content.
+port: 17880
+bind_addresses:
+  - "127.0.0.1"
+rtc:
+  tcp_port: 7881
+  # UDP-диапазон для медиа. 100 портов хватает на 6 игроков.
+  port_range_start: 50000
+  port_range_end: 50100
+  # В LAN внешний STUN-IP только мешает: клиенты идут напрямую к хосту.
+  use_external_ip: false
+keys:
+  # Должны совпадать с LIVEKIT_API_KEY / LIVEKIT_API_SECRET на игровом сервере.
+  # LiveKit требует секрет >= 32 символов.
+  devkey: chronolet-dev-secret-please-change-01
+logging:
+  level: info

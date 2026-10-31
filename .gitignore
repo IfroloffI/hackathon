@@ -8,3 +8,5 @@ data/*.db-*
 data/*.duckdb
 data/*.duckdb.wal
 data/.jwt-secret
+.cache/
+livekit/certs/

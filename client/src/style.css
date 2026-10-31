@@ -266,3 +266,17 @@ kbd {
   #puzzle { bottom: 260px; max-height: 40vh; }
   #prompt { bottom: 440px; }
 }
+
+/* ── Голосовой чат (LiveKit) ── */
+.voice-audio { display: none; }
+#voice-status { white-space: nowrap; }
+#voice-mute.on { background: #2a7a3b; border-color: #7dff9a; }
+#voice-unblock { animation: voice-pulse 1.2s ease-in-out infinite; }
+#crew-list li.speaking .avatar {
+  box-shadow: 0 0 0 3px rgba(125, 255, 154, 0.35), 0 0 10px #7dff9a;
+}
+#crew-list .wave { color: #7dff9a; font-size: 0.75rem; letter-spacing: -1px; }
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(125, 255, 154, 0); }
+  50% { box-shadow: 0 0 12px rgba(125, 255, 154, 0.8); }
+}

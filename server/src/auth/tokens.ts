@@ -2,6 +2,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
+import { AccessToken } from 'livekit-server-sdk';
 import type { AuthPlayer } from '@chronolet/shared';
 import { config } from '../config.ts';
 
@@ -92,4 +93,25 @@ export function getBearerToken(headerValue: string | undefined): string | null {
   if (headerValue === undefined) { return null; }
   const [scheme, token] = headerValue.split(' ', 2);
   return scheme?.toLowerCase() === 'bearer' && token ? token : null;
+}
+
+/**
+ * Настоящий AccessToken LiveKit (JWT, подписанный HMAC API-секретом).
+ * Только с таким токеном LiveKit пустит участника в комнату и разрешит
+ * публиковать/слушать аудио. `identity` — стабильный id игрока.
+ */
+export async function issueLiveKitToken(player: AuthPlayer, room: string): Promise<string> {
+  const at = new AccessToken(config.livekit.apiKey, config.livekit.apiSecret, {
+    identity: player.id,
+    name: player.name,
+    ttl: config.livekit.ttl,
+  });
+  at.addGrant({
+    room,
+    roomJoin: true,
+    canPublish: true,
+    canSubscribe: true,
+    canPublishData: true,
+  });
+  return await at.toJwt();
 }

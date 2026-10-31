@@ -4,12 +4,26 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { createAuthContext, matchMaker, ServerError } from 'colyseus';
-import { CREW_ROOM, type ManagedRoomInfo, type RoomListing } from '@chronolet/shared';
+import {
+  CREW_ROOM,
+  livekitRoomName,
+  type LiveKitStatusResponse,
+  type ManagedRoomInfo,
+  type RoomListing,
+  type VoiceTokenResponse,
+} from '@chronolet/shared';
 import { sessions, players, profiles } from '../db/repositories.ts';
 import { registerLlmRoutes } from '../llm/routes.ts';
 import { timeseries } from '../timeseries/store.ts';
 import { config } from '../config.ts';
-import { getBearerToken, issueToken, revokeToken, verifyToken, type VerifiedPlayer } from '../auth/tokens.ts';
+import {
+  getBearerToken,
+  issueLiveKitToken,
+  issueToken,
+  revokeToken,
+  verifyToken,
+  type VerifiedPlayer,
+} from '../auth/tokens.ts';
 import { hashPassword, passwordProblem, verifyPassword } from '../auth/passwords.ts';
 import * as roomManager from '../rooms/roomManager.ts';
 import { closeRoomChannels, disconnectPlayer } from '../net/helloHub.ts';
@@ -170,6 +184,39 @@ export async function buildApp(httpServer: HttpServer): Promise<FastifyInstance>
     return { closed: disconnectPlayer(id, player.id) };
   });
 
+  // ---------- голосовой чат (LiveKit) ----------
+
+  app.get('/api/livekit', async (req): Promise<LiveKitStatusResponse> => ({
+    enabled: config.livekit.enabled,
+    url: config.livekit.enabled ? livekitUrl(req) : null,
+  }));
+
+  /**
+   * Токен участника голосовой комнаты. LiveKit-комната создаётся сам,
+   * когда в неё заходит первый участник, — отдельный createRoom не нужен.
+   */
+  app.post<{ Params: { id: string } }>('/room/:id/voice-token', { preHandler: requireAuth }, async (req, reply) => {
+    const player = authed(req);
+    if (player === null) { return reply.code(401).send({ error: 'Требуется авторизация: POST /auth/login' }); }
+    if (!config.livekit.enabled) {
+      return reply.code(503).send({ error: 'Голосовой чат выключен на сервере (LIVEKIT_ENABLED=0)' });
+    }
+    const gameRoom = await matchMaker.getRoomById(req.params.id);
+    if (gameRoom === undefined) {
+      return reply.code(404).send({ error: 'Комната не найдена' });
+    }
+    // getRoomById отдаёт кэш (там clients — число); сами клиенты — в локальном инстансе.
+    const localRoom = matchMaker.getLocalRoomById(gameRoom.roomId) as unknown as
+      | { clients: Iterable<{ userData?: { playerId?: string } }> }
+      | undefined;
+    if (localRoom === undefined || !isRoomMember(localRoom, player.id)) {
+      return reply.code(403).send({ error: 'Сначала войди в игровую комнату' });
+    }
+    const room = livekitRoomName(gameRoom.roomId);
+    const token = await issueLiveKitToken({ id: player.id, name: player.name }, room);
+    return { url: livekitUrl(req), token, room } satisfies VoiceTokenResponse;
+  });
+
   // ---------- matchmake (wire-контракт @colyseus/sdk) ----------
 
   app.post<{ Params: { method: string; roomName: string } }>('/matchmake/:method/:roomName', async (req, reply) => {
@@ -281,6 +328,28 @@ function loginAllowed(ip: string, name: string): boolean {
   recent.push(now);
   attempts.set(key, recent);
   return recent.length <= 10;
+}
+
+/**
+ * Публичный адрес LiveKit для браузера. Явный LIVEKIT_URL (нужен за прокси
+ * или при Docker) важнее; иначе — тот же хост, что и у игры, порт 7880.
+ */
+function livekitUrl(req: FastifyRequest): string {
+  if (config.livekit.url !== null) { return config.livekit.url; }
+  const forwarded = req.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim() ?? req.protocol;
+  return `${proto === 'https' ? 'wss' : 'ws'}://${req.hostname}:${config.livekit.port}`;
+}
+
+/** Голосовой токен выдаём только тем, кто уже сидит в игровой комнате. */
+function isRoomMember(
+  room: { clients: Iterable<{ userData?: { playerId?: string } }> },
+  playerId: string,
+): boolean {
+  for (const client of room.clients) {
+    if (client.userData?.playerId === playerId) { return true; }
+  }
+  return false;
 }
 
 function matchmakeErrorStatus(e: unknown): number {
