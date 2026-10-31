@@ -11,14 +11,19 @@ export async function inviteLink(roomId: string): Promise<string> {
   const url = new URL(location.href);
   url.search = `?room=${roomId}`;
   url.hash = '';
+
   if (LOCAL_HOSTS.has(url.hostname)) {
     try {
-      const [ip] = await net.hostAddresses();
-      if (ip) url.hostname = ip;
+      const addrs = await net.hostAddresses();
+      if (addrs && addrs.length > 0) {
+        url.hostname = addrs[0];
+      }
     } catch {
-      // сервер не ответил — оставляем как есть
+      // сервер не ответил — оставляем ссылку с localhost,
+      // другой игрок должен вручную скопировать адрес из чата
     }
   }
+
   return url.toString();
 }
 
