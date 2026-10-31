@@ -50,7 +50,7 @@ const stmt = {
 };
 
 export const players = {
-  /** Пока авторизация «по имени»: нашли — вернули, нет — завели. Пароль/JWT добавятся в auth. */
+  /** Авторизация «по имени»: нашли — вернули, нет — завели. */
   findOrCreate(name: string): PlayerRow {
     const now = Date.now();
     const existing = stmt.findPlayerByName.get(name) as PlayerRow | undefined;
@@ -59,8 +59,15 @@ export const players = {
       return existing;
     }
     const row = { id: randomUUID(), name };
-    stmt.insertPlayer.run(row.id, row.name, now, now);
-    return row;
+    try {
+      stmt.insertPlayer.run(row.id, row.name, now, now);
+      return row;
+    } catch {
+      // второй одновременный логин с тем же именем проиграл INSERT — перечитываем
+      const winner = stmt.findPlayerByName.get(name) as PlayerRow | undefined;
+      if (!winner) { throw new Error(`игрок «${name}» не создался`); }
+      return winner;
+    }
   },
 };
 
