@@ -54,6 +54,21 @@ const MIGRATIONS: string[] = [
     role TEXT NOT NULL, text TEXT NOT NULL, ts INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE player_profile (
+    player_id TEXT PRIMARY KEY,
+    coins INTEGER NOT NULL DEFAULT 0,
+    skin TEXT NOT NULL DEFAULT 'default',
+    owned_json TEXT NOT NULL DEFAULT '["default"]',
+    updated_at INTEGER NOT NULL
+  );
+  `,
+  `
+  ALTER TABLE player_profile ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE player_profile ADD COLUMN likes INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE player_profile ADD COLUMN achievements_json TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE player_profile ADD COLUMN stats_json TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 function openDb(): DatabaseSync {

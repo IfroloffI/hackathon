@@ -14,6 +14,14 @@ export const PlayerState = schema(
     anim: t.string(),
     facing: t.int8(),
     connected: t.boolean(),
+    /** Кошелёк VK Coin и скины — публичны: видно, кто в чём и сколько насобирал. */
+    coins: t.uint32(),
+    skin: t.string(),
+    owned: t.array('string'),
+    /** Геймификация: опыт (уровень считается из него), лайки, значки. */
+    xp: t.uint32(),
+    likes: t.uint32(),
+    achievements: t.array('string'),
   },
   'PlayerState',
 );
@@ -30,11 +38,30 @@ export const PuzzleState = schema(
     observer: t.string(),
     mechanic: t.string(),
     attempts: t.uint16(),
+    hintsGiven: t.uint8(),
     solved: t.boolean(),
   },
   'PuzzleState',
 );
 export type PuzzleState = SchemaType<typeof PuzzleState>;
+
+/** Текущий шаг сценария эпохи — цель для HUD. */
+export const ScenarioState = schema(
+  {
+    id: t.string(),
+    title: t.string(),
+    stepId: t.string(),
+    stepTitle: t.string(),
+    goal: t.string(),
+    stepIndex: t.uint8(),
+    steps: t.uint8(),
+    /** Серверное время начала шага (ms) и контрольное время (с, 0 — нет). */
+    stepStartedAt: t.number(),
+    parSeconds: t.uint16(),
+  },
+  'ScenarioState',
+);
+export type ScenarioState = SchemaType<typeof ScenarioState>;
 
 export const CrewState = schema(
   {
@@ -46,8 +73,11 @@ export const CrewState = schema(
     /** id полученных деталей двигателя по порядку. */
     parts: t.array('string'),
     puzzle: PuzzleState,
+    scenario: ScenarioState,
     /** Двигатель починен, экипаж вернулся домой. */
     finished: t.boolean(),
+    /** id собранных за сессию сфер VK Coin (на всех уровнях). */
+    coinsTaken: t.array('string'),
     /** ключ — sessionId клиента Colyseus */
     players: t.map(PlayerState),
   },

@@ -72,3 +72,18 @@
 ## ИИ (следующий этап)
 
 `server/src/agents/` — `AgentService` подписан на `EventBus`, `OllamaClient` с таймаутом 3 с (null → фолбэк-реплика). Таблицы `agent_memory` и `dialog_log` уже в схеме БД. Контент агентов — `agents/<id>/persona.md`, `knowledge.json`, `fallback.json` (раздел 5.3 дизайн-дока).
+
+
+## Временные ряды, сценарии, LLM (обновление)
+
+```
+CrewRoom.emit(type, player, data) ─▶ eventBus.emit ─┬▶ DuckDB events (Appender, пакет раз в 500 мс)
+                                                    ├▶ LLM-хаб: WS /llm/stream (+ реплей ?since=)
+                                                    └▶ AgentService (отладка)
+CrewRoom телеметрия 5 Гц ─────────────────────────────▶ DuckDB telemetry
+```
+
+- **Хранилища:** SQLite — сущности (игроки, профили: кошелёк, XP, ачивки, статистика; сессии; память агентов). DuckDB — ряды (`events`, `telemetry`), окна `time_bucket`, `lag`, `arg_max` (`server/src/timeseries/store.ts`).
+- **Сценарии** — данные (`shared/src/scenarios.ts`), исполнитель — `server/src/rooms/scenario.ts`. Комната сообщает факты (роли, этапы, решено, на борту), исполнитель возвращает переходы шагов; комната превращает их в события, XP за темп и реплики. Шаг хранится в `state.scenario` (цель в HUD).
+- **Прогрессия** — `server/src/rooms/progression.ts`: XP, уровни, ачивки, лайки; правила в одном месте, комната только сообщает факты.
+- **LLM** — `server/src/llm/hub.ts` (поток, снимки, реестр сессий) и `routes.ts` (REST). Контракт — `docs/LLM_CONTRACTS.md`, типы — `shared/src/llm.ts`.

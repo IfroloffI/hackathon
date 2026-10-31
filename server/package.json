@@ -9,13 +9,16 @@
     "smoke": "tsx scripts/smoke.ts",
     "udp-listen": "tsx scripts/udp-listen.ts",
     "test": "tsx --test src/**/*.test.ts",
-    "playthrough": "tsx scripts/playthrough.ts"
+    "playthrough": "tsx scripts/playthrough.ts",
+    "llm-mock": "tsx scripts/llm-mock.ts",
+    "llm-contract": "tsx scripts/llm-contract.ts"
   },
   "dependencies": {
     "@chronolet/shared": "*",
+    "@colyseus/ws-transport": "^0.18.4",
+    "@duckdb/node-api": "^1.4.5-r.1",
     "@fastify/cors": "^11.3.1",
     "@fastify/static": "^10.1.8",
-    "@colyseus/ws-transport": "^0.18.4",
     "colyseus": "^0.18.10",
     "express": "^5.1.0",
     "fastify": "^5.12.7",

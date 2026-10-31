@@ -3,18 +3,33 @@ import type { NetPlayer } from '../net/connection.ts';
 
 /** Чужой игрок: цель приходит патчами ~20 Гц, рисуем плавно (экспоненциальное сглаживание). */
 export class RemotePlayer {
-  readonly view: Character;
+  view: Character;
+  private role: string | null = null;
   private x: number;
   private y: number;
   private z: number;
 
   constructor(private state: NetPlayer) {
-    this.view = new Character(state.name, state.color);
+    this.view = new Character(state.name, state.color, { skin: state.skin });
     ({ x: this.x, y: this.y, z: this.z } = state);
+  }
+
+  /** Роль запоминаем, чтобы восстановить табличку после смены скина. */
+  setRole(role: string | null) {
+    this.role = role;
+    this.view.setRole(role);
   }
 
   update(dt: number) {
     const s = this.state;
+    // Сменил скин в магазине — пересобираем персонажа на том же месте сцены.
+    if (s.skin && s.skin !== this.view.skinId) {
+      const parent = this.view.root.parent;
+      this.view.dispose();
+      this.view = new Character(s.name, s.color, { skin: s.skin });
+      this.view.setRole(this.role);
+      parent?.add(this.view.root);
+    }
     // Далеко (респаун/реконнект) — телепорт, иначе догоняем.
     if (Math.hypot(s.x - this.x, s.y - this.y) > 4) {
       ({ x: this.x, y: this.y, z: this.z } = s);

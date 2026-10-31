@@ -1,4 +1,5 @@
-import { eventBus, type GameEvent } from '../core/eventBus.ts';
+import type { GameEvent } from '@chronolet/shared';
+import { eventBus } from '../core/eventBus.ts';
 import { config } from '../config.ts';
 import { OllamaClient } from './ollama.ts';
 
@@ -20,6 +21,6 @@ export class AgentService {
 
   private onEvent(e: GameEvent) {
     if (process.env.DEBUG_EVENTS === '1') console.log('[agents] event', e);
-    // TODO: ShipAI.comment(e) / Narrator.react(e)
+    // Реплики LLM приходят от внешнего сервиса через /llm/say (контракт — shared/src/llm.ts).
   }
 }

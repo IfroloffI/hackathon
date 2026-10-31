@@ -5,30 +5,38 @@
 import type { PuzzleId, Role } from './epochs.ts';
 
 // --- Эратосфен: «Тень и колодец»
+export type EratStage = 'measure' | 'compute' | 'confirm' | 'solved';
 export interface EratObserverView {
-  stage: 'measure' | 'compute' | 'solved';
+  stage: EratStage;
   /** Расстояние Сиена — Александрия, стадии. */
   distance: number;
   angleLocked: boolean;
+  /** Что Механик набрал на счётах — видно на этапе подтверждения. */
+  abacus: number | null;
 }
 export interface EratMechanicView {
-  stage: 'measure' | 'compute' | 'solved';
+  stage: EratStage;
   /** Угол дуги, которую двигает Механик, градусы. */
   arc: number;
   /** Угол тени гномона — Механик видит тень, но не знает расстояние. */
   shadow: number;
   locked: boolean;
+  abacus: number | null;
 }
 
 // --- Галилей: «Фазы Венеры»
 export type VenusPhase = 'new' | 'crescent' | 'half' | 'gibbous' | 'full';
 export interface GalileoObserverView {
+  stage: 'nights' | 'moons' | 'solved';
   night: number;
   nights: number;
-  /** Что видно в телескопе этой ночью. */
-  phase: VenusPhase;
-  /** Освещённая доля диска, 0..1 — для рисования. */
-  lit: number;
+  /** Что видно в телескопе этой ночью; null — небо затянуто облаками. */
+  phase: VenusPhase | null;
+  /** Освещённая доля диска, 0..1 — для рисования; null — облака. */
+  lit: number | null;
+  clouds: boolean;
+  /** Этап спутников: положения лун Юпитера (смещение по x) за две ночи. */
+  moons: number[][] | null;
   solved: boolean;
 }
 export interface GalileoMechanicView {
@@ -41,6 +49,9 @@ export interface GalileoMechanicView {
   sun: [number, number];
   earth: [number, number];
   venus: [number, number];
+  stage: 'nights' | 'moons' | 'solved';
+  /** Ответ Механика на этапе спутников. */
+  moonsAnswer: number | null;
   solved: boolean;
 }
 
@@ -50,8 +61,13 @@ export interface NewtonShot {
   points: [number, number][];
 }
 export interface NewtonObserverView {
+  /** Номер мишени (с 0) и сколько всего. */
+  round: number;
+  rounds: number;
   target: number;
   tolerance: number;
+  /** Ветер вдоль поля, м/с (+ — от пушки к мишени). Видит только Наблюдатель — по флюгеру. */
+  wind: number;
   shots: NewtonShot[];
   solved: boolean;
 }
@@ -61,11 +77,16 @@ export interface NewtonMechanicView {
   speedRange: [number, number];
   angleRange: [number, number];
   shotsFired: number;
+  round: number;
+  rounds: number;
   solved: boolean;
 }
 
 // --- Тьюринг: «Взлом Энигмы»
 export interface EnigmaObserverView {
+  /** Номер перехвата (с 0) и сколько всего. */
+  intercept: number;
+  intercepts: number;
   stage: 'crib' | 'rotors' | 'solved';
   cipher: string;
   crib: string;
@@ -74,6 +95,8 @@ export interface EnigmaObserverView {
   plaintext: string | null;
 }
 export interface EnigmaMechanicView {
+  intercept: number;
+  intercepts: number;
   stage: 'crib' | 'rotors' | 'solved';
   /** Положения трёх роторов, 1..25 (сдвиг; 0 запрещён — буква не шифруется в себя). */
   rotors: [number, number, number];

@@ -1,17 +1,12 @@
-/**
- * Внутренняя шина событий игры. Комнаты публикуют, подписчики (лог, будущий AgentService
- * с бортовым ИИ и рассказчиками) реагируют. Комнаты не знают о подписчиках.
- */
-export type GameEvent =
-  | { type: 'player.join'; sessionId: string; playerId: string; name: string }
-  | { type: 'player.leave'; sessionId: string; playerId: string; name: string }
-  | { type: 'chat'; sessionId: string; playerId: string; name: string; text: string }
-  | { type: 'session.created'; sessionId: string; crewName: string }
-  | { type: 'session.disposed'; sessionId: string }
-  | { type: 'epoch.change'; sessionId: string; levelId: string }
-  | { type: 'puzzle'; sessionId: string; puzzleId: string; event: string; playerId: string; attempts: number }
-  | { type: 'part.awarded'; sessionId: string; partId: string };
+import type { GameEvent } from '@chronolet/shared';
+import { timeseries } from '../timeseries/store.ts';
 
+/**
+ * Шина игровых событий. Каждое событие получает сквозной seq и время, пишется во временной ряд
+ * (DuckDB) и раздаётся подписчикам: LLM-хаб (/llm/stream), сервис агентов, отладка.
+ * Комнаты не знают, кто слушает.
+ */
+export type EmitInput = Omit<GameEvent, 'seq' | 'ts'>;
 type Handler = (e: GameEvent) => void;
 
 class EventBus {
@@ -22,7 +17,9 @@ class EventBus {
     return () => this.handlers.delete(handler);
   }
 
-  emit(e: GameEvent) {
+  emit(input: EmitInput): GameEvent {
+    const e: GameEvent = { seq: timeseries.nextSeq(), ts: Date.now(), ...input };
+    timeseries.appendEvent(e);
     for (const h of this.handlers) {
       try {
         h(e);
@@ -30,6 +27,7 @@ class EventBus {
         console.error('[eventBus] handler failed', e.type, err);
       }
     }
+    return e;
   }
 }
 

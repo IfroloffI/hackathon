@@ -16,6 +16,8 @@ export abstract class Puzzle {
   abstract readonly id: PuzzleId;
   attempts = 0;
   solved = false;
+  /** Сколько этапов пройдено — по нему сценарий двигает шаги. */
+  stagesPassed = 0;
   /** Подсказки бортового ИИ по нарастающей: намёк → направление → почти ответ. */
   abstract readonly hints: readonly [string, string, string];
 
@@ -25,6 +27,16 @@ export abstract class Puzzle {
   abstract view(role: Role): unknown;
   /** Действие игрока на роли. null — действие проигнорировано (не та роль, не тот этап, мусор). */
   abstract act(role: Role, action: string, value: unknown): ActionResult | null;
+
+  /** Когда вид роли изменится сам по себе (облака рассеются и т. п.) — комната перешлёт виды. */
+  nextChangeAt(): number | null {
+    return null;
+  }
+
+  protected stage(message: string): ActionResult {
+    this.stagesPassed++;
+    return { event: 'stage_passed', message };
+  }
 
   protected fail(message: string): ActionResult {
     this.attempts++;

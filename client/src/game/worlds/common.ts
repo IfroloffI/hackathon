@@ -120,6 +120,7 @@ const STATION_COLOR: Record<StationKind, number> = {
   jump: 0xff5e5e,
   return: 0x7dff9a,
   narrator: 0xffe066,
+  shop: 0x0077ff,
 };
 
 /** Светящийся круг на полу у станции + столбик света: «здесь можно нажать E». */

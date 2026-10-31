@@ -8,11 +8,20 @@ const VENUS_ORBIT = 0.72;
 /** Птолемей: Венера на эпицикле, центр которого всегда на линии Земля — Солнце, между ними. */
 const EPICYCLE = { center: 0.6, radius: 0.25 };
 
-/** Ночи наблюдений: какую фазу видит Наблюдатель. Полный диск в геоцентрической схеме недостижим. */
+/** Ночи наблюдений: какую фазу видит Наблюдатель. Полный и почти полный диск в геоцентрической схеме недостижимы. */
 const NIGHTS: { phase: VenusPhase; lit: number }[] = [
   { phase: 'crescent', lit: 0.2 },
   { phase: 'half', lit: 0.5 },
+  { phase: 'gibbous', lit: 0.78 },
   { phase: 'full', lit: 0.95 },
+];
+/** В эту ночь (с 0) небо сначала затянуто — Наблюдатель ждёт, пока облака уйдут. */
+const CLOUDY_NIGHT = 2;
+export const CLOUD_MS = 8000;
+/** Спутники Юпитера за две ночи: смещения от планеты. Их четыре — ответ этапа «moons». */
+const MOONS = [
+  [-34, -21, 12, 30],
+  [-28, 9, 18, -40],
 ];
 
 const PHASE_NAME: Record<VenusPhase, string> = {
@@ -55,7 +64,9 @@ export function phaseOf(lit: number): VenusPhase {
 
 /**
  * «Фазы Венеры». Наблюдатель видит фазу в телескопе, Механик крутит модель и не видит фазу.
- * Три ночи: серп → половина → полный диск. Полный диск даёт только гелиоцентрическая схема.
+ * Четыре ночи: серп → половина → почти полный → полный (только гелиоцентрическая схема).
+ * В третью ночь первые CLOUD_MS небо в облаках. Бонус: Механик называет число спутников Юпитера,
+ * которые видит только Наблюдатель.
  */
 export class GalileoPuzzle extends Puzzle {
   readonly id = 'galileo' as const;
@@ -68,16 +79,46 @@ export class GalileoPuzzle extends Puzzle {
   private night = 0;
   private scheme: Scheme = 'geo';
   private angle = 0;
+  private nightStartedAt = Date.now();
+  private moonsAnswer: number | null = null;
+
+  constructor(private now: () => number = Date.now) {
+    super();
+    this.nightStartedAt = now();
+  }
+
+  private get stageName(): 'nights' | 'moons' | 'solved' {
+    return this.solved ? 'solved' : this.night < NIGHTS.length ? 'nights' : 'moons';
+  }
+
+  private get cloudy(): boolean {
+    return this.night === CLOUDY_NIGHT && this.now() - this.nightStartedAt < CLOUD_MS;
+  }
+
+  nextChangeAt(): number | null {
+    return this.cloudy ? this.nightStartedAt + CLOUD_MS : null;
+  }
 
   stageText(): string {
-    if (this.solved) return 'Решено: Венера вращается вокруг Солнца!';
-    return `Ночь ${this.night + 1} из ${NIGHTS.length}: Наблюдатель описывает фазу, Механик настраивает модель`;
+    if (this.solved) return 'Решено: Венера вращается вокруг Солнца, а у Юпитера свои луны!';
+    if (this.stageName === 'moons') return 'Бонус Галилея: сколько спутников у Юпитера?';
+    return `Ночь ${this.night + 1} из ${NIGHTS.length}${this.cloudy ? ' — облака!' : ''}: Наблюдатель описывает фазу, Механик настраивает модель`;
   }
 
   view(role: Role): GalileoObserverView | GalileoMechanicView {
     const night = Math.min(this.night, NIGHTS.length - 1);
     if (role === 'observer') {
-      return { night, nights: NIGHTS.length, phase: NIGHTS[night].phase, lit: NIGHTS[night].lit, solved: this.solved };
+      const hidden = this.cloudy || this.stageName !== 'nights';
+      return {
+        stage: this.stageName,
+        night,
+        nights: NIGHTS.length,
+        phase: hidden ? null : NIGHTS[night].phase,
+        lit: hidden ? null : NIGHTS[night].lit,
+        clouds: this.cloudy,
+        moons: this.stageName === 'nights' ? null : MOONS,
+        solved: this.solved,
+      };
     }
     const pos = venusPositions(this.scheme, this.angle);
     const r = (v: Vec): Vec => [round(v[0], 3), round(v[1], 3)];
@@ -89,6 +130,8 @@ export class GalileoPuzzle extends Puzzle {
       sun: r(pos.sun),
       earth: r(pos.earth),
       venus: r(pos.venus),
+      stage: this.stageName,
+      moonsAnswer: this.moonsAnswer,
       solved: this.solved,
     };
   }
@@ -106,14 +149,23 @@ export class GalileoPuzzle extends Puzzle {
       this.angle = Math.round(v) % 360;
       return {};
     }
-    if (action === 'observe') {
+    if (action === 'moons' && this.stageName === 'moons') {
+      const n = num(value, 0, 12);
+      if (n === null || !Number.isInteger(n)) return null;
+      this.moonsAnswer = n;
+      if (n !== MOONS[0].length) return this.fail(`${n} — Галилей пересчитывает и не соглашается`);
+      return this.win('Четыре спутника Юпитера — «Медицейские звёзды»!');
+    }
+    if (action === 'observe' && this.stageName === 'nights') {
+      if (this.cloudy) return { message: 'Облака! Ждите, пока Наблюдатель увидит Венеру' };
       const modelPhase = phaseOf(litFraction(this.scheme, this.angle));
       const target = NIGHTS[this.night].phase;
       // Сообщение видят все — не раскрываем, какую фазу дала модель, иначе Механик подберёт её в одиночку.
       if (modelPhase !== target) return this.fail('Модель не совпала с наблюдением');
       this.night++;
-      if (this.night === NIGHTS.length) return this.win('Все три ночи совпали с моделью');
-      return { event: 'stage_passed', message: `Ночь ${this.night}: модель совпала с наблюдением (${PHASE_NAME[target]})` };
+      this.nightStartedAt = this.now();
+      if (this.night === NIGHTS.length) return this.stage('Все четыре ночи совпали с моделью. Теперь — Юпитер');
+      return this.stage(`Ночь ${this.night}: модель совпала с наблюдением (${PHASE_NAME[target]})`);
     }
     return null;
   }

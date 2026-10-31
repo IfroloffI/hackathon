@@ -28,6 +28,10 @@ export const config = {
   },
   /** Для разработки: один игрок может занять обе роли. На хакатоне выключено — головоломки строго на двоих. */
   soloRoles: process.env.CHRONOLET_SOLO === '1',
+  /** Временные ряды (DuckDB) — отдельный файл рядом с SQLite. */
+  tsdbPath: process.env.TSDB_PATH ?? path.join(root, 'data', 'chronolet.duckdb'),
+  /** Сервисный токен LLM-сервиса: Bearer для /llm/*, ?token= для WS /llm/stream. */
+  llmToken: process.env.LLM_SERVICE_TOKEN ?? 'dev-llm-token',
   ollama: {
     enabled: process.env.OLLAMA_ENABLED === '1',
     url: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',

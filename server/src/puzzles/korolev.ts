@@ -8,8 +8,13 @@ import type {
 } from '@chronolet/shared';
 import { Puzzle, num, round, type ActionResult } from './Puzzle.ts';
 
+export interface RocketParams {
+  payload: number;
+  massLimit: number;
+}
+
 export const ROCKET = {
-  payload: 1, // т, корабль
+  payload: 1, // т, корабль (по умолчанию; в сессии — случайный из VARIANTS)
   tank: { fuel: 10, dry: 1 }, // т
   engines: { A: { mass: 1.5, ve: 2.6 }, B: { mass: 3, ve: 3.1 } } as Record<EngineType, { mass: number; ve: number }>,
   massLimit: 120, // т, грузоподъёмность стартового стола
@@ -21,15 +26,46 @@ export const ROCKET = {
 const stageDry = (s: RocketStage) => s.tanks * ROCKET.tank.dry + ROCKET.engines[s.engine].mass;
 const stageMass = (s: RocketStage) => s.tanks * (ROCKET.tank.fuel + ROCKET.tank.dry) + ROCKET.engines[s.engine].mass;
 const active = (stages: RocketStage[]) => stages.filter((s) => s.tanks > 0);
+const DEFAULT: RocketParams = { payload: ROCKET.payload, massLimit: ROCKET.massLimit };
 
-export function rocketMass(stages: RocketStage[]): number {
-  return ROCKET.payload + active(stages).reduce((m, s) => m + stageMass(s), 0);
+export function rocketMass(stages: RocketStage[], p: RocketParams = DEFAULT): number {
+  return p.payload + active(stages).reduce((m, s) => m + stageMass(s), 0);
 }
 
+/** Все конфигурации из 1..maxStages ступеней (для проверки вариантов перебором). */
+export function* rocketConfigs(maxStages: number): Generator<RocketStage[]> {
+  const opts: RocketStage[] = [];
+  for (let t = 1; t <= ROCKET.maxTanks; t++) for (const e of ['A', 'B'] as const) opts.push({ tanks: t, engine: e });
+  function* build(prefix: RocketStage[]): Generator<RocketStage[]> {
+    if (prefix.length) yield prefix;
+    if (prefix.length < maxStages) for (const o of opts) yield* build([...prefix, o]);
+  }
+  yield* build([]);
+}
+
+/**
+ * Варианты «корабль × стартовый стол», для которых сценарий честный: ни одна 1–2-ступенчатая
+ * ракета не выходит на орбиту, а какая-то 3-ступенчатая — выходит. Считается один раз перебором.
+ */
+export const VARIANTS: RocketParams[] = (() => {
+  const out: RocketParams[] = [];
+  for (const payload of [0.8, 1, 1.2, 1.5])
+    for (const massLimit of [110, 115, 120, 125]) {
+      const p = { payload, massLimit };
+      let two = false;
+      for (const c of rocketConfigs(2)) if (simulate(c, p).ok) { two = true; break; }
+      if (two) continue;
+      let three = false;
+      for (const c of rocketConfigs(3)) if (c.length === 3 && simulate(c, p).ok) { three = true; break; }
+      if (three) out.push(p);
+    }
+  return out;
+})();
+
 /** Формула Циолковского по ступеням снизу вверх: Δv = v_e · ln(m0 / m1), после работы ступень сбрасывается. */
-export function simulate(stages: RocketStage[]): KorolevLaunch {
+export function simulate(stages: RocketStage[], p: RocketParams = DEFAULT): KorolevLaunch {
   const list = active(stages);
-  let mass = rocketMass(stages);
+  let mass = rocketMass(stages, p);
   const result: KorolevLaunch['stages'] = [];
   let total = 0;
   for (const s of list) {
@@ -41,11 +77,11 @@ export function simulate(stages: RocketStage[]): KorolevLaunch {
     mass = m1 - stageDry(s);
   }
   total = round(total);
-  const m0 = rocketMass(stages);
+  const m0 = rocketMass(stages, p);
   let reason: string;
   let ok = false;
   if (list.length === 0) reason = 'Ракеты нет: ни одного бака';
-  else if (m0 > ROCKET.massLimit) reason = `Масса ${round(m0, 1)} т больше грузоподъёмности стола ${ROCKET.massLimit} т — ракета не оторвалась`;
+  else if (m0 > p.massLimit) reason = `Масса ${round(m0, 1)} т больше грузоподъёмности стола ${p.massLimit} т — ракета не оторвалась`;
   else if (total < ROCKET.required) reason = `Набрана скорость ${total} км/с из ${ROCKET.required} — ракета упала`;
   else {
     ok = true;
@@ -64,7 +100,7 @@ export class KorolevPuzzle extends Puzzle {
   readonly hints = [
     'Ракета тащит вверх пустые баки. Зачем они ей, когда топливо кончилось?',
     'Разбейте ракету на ступени: отработавшая ступень сбрасывается, и верхним легче разгоняться.',
-    'Попробуйте три ступени: снизу 6 баков и двигатель B, в середине 3 бака и B, сверху 1 бак и A.',
+    'Три ступени, снизу самая тяжёлая на двигателе B, сверху — маленькая. Следите, чтобы масса влезла в стол.',
   ] as const;
 
   private stages: RocketStage[] = [
@@ -73,6 +109,12 @@ export class KorolevPuzzle extends Puzzle {
     { tanks: 0, engine: 'A' },
   ];
   private launches: KorolevLaunch[] = [];
+  readonly params: RocketParams;
+
+  constructor(rand = Math.random, params?: RocketParams) {
+    super();
+    this.params = params ?? VARIANTS[Math.floor(rand() * VARIANTS.length)];
+  }
 
   stageText(): string {
     if (this.solved) return 'Решено: ракета вышла на орбиту!';
@@ -80,14 +122,14 @@ export class KorolevPuzzle extends Puzzle {
   }
 
   view(role: Role): KorolevObserverView | KorolevMechanicView {
-    const mass = round(rocketMass(this.stages), 1);
+    const mass = round(rocketMass(this.stages, this.params), 1);
     if (role === 'observer') {
       return {
         required: ROCKET.required,
         engines: { A: { ve: ROCKET.engines.A.ve }, B: { ve: ROCKET.engines.B.ve } },
         mass,
         fuel: active(this.stages).reduce((f, s) => f + s.tanks * ROCKET.tank.fuel, 0),
-        massLimit: ROCKET.massLimit,
+        massLimit: this.params.massLimit,
         launches: this.launches.slice(-4),
         solved: this.solved,
       };
@@ -99,10 +141,10 @@ export class KorolevPuzzle extends Puzzle {
       parts: {
         tank: ROCKET.tank,
         engines: { A: { mass: ROCKET.engines.A.mass }, B: { mass: ROCKET.engines.B.mass } },
-        payload: ROCKET.payload,
+        payload: this.params.payload,
       },
       mass,
-      massLimit: ROCKET.massLimit,
+      massLimit: this.params.massLimit,
       launches: this.launches.length,
       solved: this.solved,
     };
@@ -120,7 +162,7 @@ export class KorolevPuzzle extends Puzzle {
       return {};
     }
     if (action === 'launch') {
-      const launch = simulate(this.stages);
+      const launch = simulate(this.stages, this.params);
       this.launches.push(launch);
       // Публичное сообщение без цифр: телеметрия — данные Наблюдателя.
       if (launch.ok) return this.win('Пуск! Ракета ушла на орбиту');

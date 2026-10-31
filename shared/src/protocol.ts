@@ -11,6 +11,15 @@ export const ClientMsg = {
   Interact: 'interact',
   /** Действие на своей роли в головоломке. */
   PuzzleAction: 'puzzle.action',
+  /** Магазин на борту: купить / надеть скин. */
+  ShopBuy: 'shop.buy',
+  ShopEquip: 'shop.equip',
+  /** Лайк другому игроку. */
+  Like: 'like',
+  /** Стикер-эмоция над головой. */
+  Emote: 'emote',
+  /** Вопрос агенту (рассказчику или ХРОНОСу): «@Галилей …» в чате. */
+  Ask: 'agent.ask',
   // Зарезервировано: Grab: 'grab', Release: 'release', AgentAsk: 'agent.ask'
 } as const;
 
@@ -23,6 +32,16 @@ export const ServerMsg = {
   PuzzleView: 'puzzle.view',
   /** Сервер переставил игрока (смена уровня). */
   Teleport: 'teleport',
+  /** Кто-то подобрал сферу VK Coin. */
+  Coin: 'coin',
+  /** Ответ магазина лично покупателю. */
+  Shop: 'shop',
+  Like: 'like',
+  Emote: 'emote',
+  /** Кто-то получил ачивку. */
+  Achievement: 'achievement',
+  /** Лично игроку: начислен опыт. */
+  Xp: 'xp',
 } as const;
 
 export interface InteractPayload {
@@ -42,6 +61,11 @@ export interface SayPayload {
   text: string;
   /** Подсказка бортового ИИ: уровень 1..3. */
   hint?: number;
+  /** Потоковая реплика LLM: куски с одним streamId; partial=true — ещё печатает. */
+  streamId?: string;
+  partial?: boolean;
+  /** Откуда реплика: заготовка или живая LLM. */
+  source?: 'script' | 'llm';
 }
 
 export interface TeleportPayload {
@@ -98,4 +122,56 @@ export interface RoomListing {
   maxClients: number;
   locked: boolean;
   metadata: CrewRoomMetadata;
+}
+
+export interface ShopPayload {
+  skinId: string;
+}
+
+export interface CoinPickup {
+  coinId: string;
+  sessionId: string;
+  name: string;
+}
+
+export interface ShopResult {
+  ok: boolean;
+  text: string;
+}
+
+export interface LikePayload {
+  /** sessionId того, кому лайк. */
+  target: string;
+}
+
+export interface LikeBroadcast {
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+}
+
+export interface EmotePayload {
+  emote: number;
+}
+
+export interface EmoteBroadcast {
+  sessionId: string;
+  emote: number;
+}
+
+export interface AskPayload {
+  agentId: string;
+  text: string;
+}
+
+export interface AchievementBroadcast {
+  sessionId: string;
+  name: string;
+  id: string;
+}
+
+export interface XpGain {
+  amount: number;
+  reason: string;
 }

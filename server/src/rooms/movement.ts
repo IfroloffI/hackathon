@@ -1,4 +1,4 @@
-import { PHYSICS, type Anim, type Level, type MovePayload } from '@chronolet/shared';
+import { PHYSICS, respawnPoint, type Anim, type Level, type MovePayload } from '@chronolet/shared';
 
 const ANIMS: ReadonlySet<Anim> = new Set(['idle', 'run', 'jump', 'fall']);
 
@@ -27,9 +27,9 @@ export function sanitizeMove(
   const maxV = Math.max(PHYSICS.jumpSpeed, PHYSICS.gravity * dt) * PHYSICS.speedTolerance * dt + 0.5;
 
   const { bounds } = level;
-  // Упал за карту — респаун. Клиент делает то же самое, поэтому телепорт здесь легален.
+  // Упал в яму — к ближайшему чекпоинту слева. Клиент делает то же самое, поэтому телепорт здесь легален.
   if ((m.y as number) < bounds.minY) {
-    return { ...level.spawn, vx: 0, vy: 0, anim: 'idle', facing: 1 };
+    return { ...respawnPoint(level, prev.x), vx: 0, vy: 0, anim: 'idle', facing: 1 };
   }
 
   return {

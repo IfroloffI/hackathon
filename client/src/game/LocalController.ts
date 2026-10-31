@@ -1,4 +1,4 @@
-import { PHYSICS, moveAndCollide, resolvePenetration, type Anim, type Level, type MovePayload } from '@chronolet/shared';
+import { PHYSICS, moveAndCollide, resolvePenetration, respawnPoint, type Anim, type Level, type MovePayload } from '@chronolet/shared';
 
 const MAX_FALL_SPEED = 20;
 
@@ -16,6 +16,8 @@ export class LocalController {
   facing: 1 | -1 = 1;
   anim: Anim = 'idle';
   private grounded = false;
+  /** Где упал в яму — Game сообщит серверу, чтобы тот тоже вернул на чекпоинт, а не резал «телепорт». */
+  private fell: { x: number; z: number } | null = null;
   private keys = new Set<string>();
   private jumpQueued = false;
   enabled = true;
@@ -59,7 +61,11 @@ export class LocalController {
     // Объекты твёрдые со всех сторон и по глубине: shared/src/physics.ts.
     this.grounded = moveAndCollide(this, dt, this.level).grounded;
 
-    if (this.y < this.level.bounds.minY) this.teleport(this.level.spawn);
+    // Упал в яму — к ближайшему чекпоинту слева (сервер считает так же).
+    if (this.y < this.level.bounds.minY) {
+      this.fell = { x: this.x, z: this.z };
+      this.teleport(respawnPoint(this.level, this.x));
+    }
 
     this.anim = !this.grounded ? (this.vy > 0 ? 'jump' : 'fall') : this.vx !== 0 ? 'run' : 'idle';
   }
@@ -68,6 +74,14 @@ export class LocalController {
   setLevel(level: Level, p: { x: number; y: number; z: number }) {
     this.level = level;
     this.teleport(p);
+  }
+
+  /** Пакет «упал ниже дна» (один раз после падения): сервер по нему делает тот же респаун. */
+  takeFall(): MovePayload | null {
+    if (!this.fell) return null;
+    const { x, z } = this.fell;
+    this.fell = null;
+    return { levelId: this.level.id, x, y: this.level.bounds.minY - 1, z, vx: 0, vy: 0, anim: 'fall', facing: this.facing };
   }
 
   snapshot(): MovePayload {

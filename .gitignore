@@ -5,3 +5,5 @@ data/*.db
 data/*.db-*
 .DS_Store
 *.log
+data/*.duckdb
+data/*.duckdb.wal

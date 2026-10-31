@@ -1,5 +1,6 @@
 import type { RoomListing } from '@chronolet/shared';
 import { net, type CrewRoom } from '../net/connection.ts';
+import { renderLeaderboard } from './leaderboard.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -120,6 +121,7 @@ export function showLobby(onJoined: (room: CrewRoom) => void) {
   }
 
   refresh();
+  void renderLeaderboard($('leaderboard'));
   const timer = setInterval(refresh, 3000);
   const stop = () => clearInterval(timer);
 }

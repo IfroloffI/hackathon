@@ -65,14 +65,13 @@ function eratObserver(el: HTMLElement, v: EratObserverView, act: Act) {
       v.stage === 'measure'
         ? '<p class="muted">Механик в Александрии измеряет угол тени гномона. Узнай у него угол.</p>'
         : v.stage === 'compute'
-          ? `<p>Механик зафиксировал угол. Посчитай окружность Земли:</p>
-             <div class="pz-row"><input id="erat-ans" type="number" min="0" placeholder="стадий"/><button id="erat-send">Сообщить Эратосфену</button></div>`
-          : '<p class="ok">Окружность Земли измерена!</p>'
+          ? '<p>Угол зафиксирован. Узнай его у Механика, посчитай окружность Земли и <b>продиктуй</b> — он наберёт число на счётах.</p>'
+          : v.stage === 'confirm'
+            ? `<p>На счётах: <b class="pz-big">${fmt(v.abacus ?? 0, 0)}</b> стадий. Всё верно?</p>
+               <div class="pz-row"><button data-act="confirm" data-value="true">Верно, к Эратосфену</button><button class="ghost" data-act="confirm" data-value="false">Пересчитать</button></div>`
+            : '<p class="ok">Окружность Земли измерена!</p>'
     }`;
-  el.querySelector('#erat-send')?.addEventListener('click', () => {
-    const val = Number(el.querySelector<HTMLInputElement>('#erat-ans')!.value);
-    if (val > 0) act('answer', val);
-  });
+  bind(el, act);
 }
 
 function eratMechanic(el: HTMLElement, v: EratMechanicView, act: Act) {
@@ -97,11 +96,20 @@ function eratMechanic(el: HTMLElement, v: EratMechanicView, act: Act) {
     <p>🏛 Ты в <b>Александрии</b> у гномона. Совмести дугу (пунктир) с солнечным лучом, который даёт тень.</p>
     <svg viewBox="0 0 240 140" class="pz-svg" id="erat-svg">${draw(v.arc)}</svg>
     ${
-      v.locked
-        ? `<p class="ok">Угол зафиксирован: <b>${fmt(v.shadow)}°</b>. Сообщи его Наблюдателю.</p>`
-        : `<div class="pz-row"><input type="range" min="0" max="20" step="0.1" value="${v.arc}" data-act="arc" id="erat-arc"/><b id="erat-arc-l">${fmt(v.arc)}°</b></div>
+      !v.locked
+        ? `<div class="pz-row"><input type="range" min="0" max="20" step="0.1" value="${v.arc}" data-act="arc" id="erat-arc"/><b id="erat-arc-l">${fmt(v.arc)}°</b></div>
            <button data-act="lock">Зафиксировать угол</button>`
+        : v.stage === 'compute'
+          ? `<p class="ok">Угол: <b>${fmt(v.shadow)}°</b>. Сообщи его Наблюдателю и набери на счётах число, которое он продиктует.</p>
+             <div class="pz-row">🧮 <input id="erat-abacus" type="number" min="0" placeholder="стадий"/><button id="erat-set">Набрать на счётах</button></div>`
+          : v.stage === 'confirm'
+            ? `<p>На счётах ${fmt(v.abacus ?? 0, 0)} — ждём подтверждения Наблюдателя.</p>`
+            : '<p class="ok">Окружность Земли измерена!</p>'
     }`;
+  el.querySelector('#erat-set')?.addEventListener('click', () => {
+    const val = Number(el.querySelector<HTMLInputElement>('#erat-abacus')!.value);
+    if (val > 0) act('abacus', val);
+  });
   bind(el, act);
   if (!v.locked) {
     liveLabel(el, '#erat-arc', '#erat-arc-l', (x) => `${fmt(x)}°`, (x) => (el.querySelector('#erat-svg')!.innerHTML = draw(x)));
@@ -126,12 +134,34 @@ function venusSvg(lit: number, r = 46) {
     </svg>`;
 }
 
+function jupiterSvg(nights: number[][]) {
+  return nights
+    .map(
+      (moons, i) => `
+    <svg viewBox="0 0 220 44" class="pz-svg pz-dark">
+      <text x="6" y="26" font-size="10" fill="#8aa">ночь ${i + 1}</text>
+      <circle cx="120" cy="22" r="9" fill="#e3c9a0"/>
+      ${moons.map((dx) => `<circle cx="${120 + dx * 1.6}" cy="22" r="2.5" fill="#fff"/>`).join('')}
+    </svg>`,
+    )
+    .join('');
+}
+
 function galileoObserver(el: HTMLElement, v: GalileoObserverView) {
-  el.innerHTML = v.solved
-    ? '<p class="ok">Все три ночи совпали с моделью. Венера вращается вокруг Солнца!</p>'
-    : `<p>🔭 Ночь <b>${v.night + 1} из ${v.nights}</b>. Ты смотришь в телескоп на Венеру.</p>
+  if (v.solved) {
+    el.innerHTML = '<p class="ok">Венера вращается вокруг Солнца, а у Юпитера — четыре спутника!</p>';
+  } else if (v.stage === 'moons') {
+    el.innerHTML = `<p>🔭 Галилей просит посмотреть на Юпитер две ночи подряд. Посчитай его спутники и скажи Механику.</p>${jupiterSvg(v.moons ?? [])}`;
+  } else if (v.clouds || v.lit === null) {
+    el.innerHTML = `<p>🔭 Ночь <b>${v.night + 1} из ${v.nights}</b>.</p>
+      <svg viewBox="0 0 220 120" class="pz-svg pz-dark"><circle cx="70" cy="60" r="56" fill="#050814" stroke="#3a3f55" stroke-width="4"/>
+      ${[[50, 50], [80, 62], [62, 76], [92, 46]].map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="28" ry="14" fill="#8a93a6" opacity=".85"/>`).join('')}</svg>
+      <p class="bad">Облака! Венеру не видно — подожди, пока разойдутся.</p>`;
+  } else {
+    el.innerHTML = `<p>🔭 Ночь <b>${v.night + 1} из ${v.nights}</b>. Ты смотришь в телескоп на Венеру.</p>
        ${venusSvg(v.lit)}
-       <p>В окуляре: <b>${PHASE_NAME[v.phase]}</b>. Опиши Механику, что видишь, — он должен получить то же на модели.</p>`;
+       <p>В окуляре: <b>${PHASE_NAME[v.phase!]}</b>. Опиши Механику, что видишь, — он должен получить то же на модели.</p>`;
+  }
 }
 
 function galileoMechanic(el: HTMLElement, v: GalileoMechanicView, act: Act) {
@@ -152,6 +182,12 @@ function galileoMechanic(el: HTMLElement, v: GalileoMechanicView, act: Act) {
       <circle cx="${sx}" cy="${sy}" r="11" fill="#ffd34d"/><circle cx="${ex}" cy="${ey}" r="7" fill="#4d96ff"/>
       <circle cx="${vx}" cy="${vy}" r="5" fill="#fff6c8" stroke="#555"/>`;
   };
+  if (v.stage === 'moons') {
+    el.innerHTML = `<p>⚙️ Модель подтверждена! Бонус Галилея: сколько спутников у Юпитера? Ответ знает Наблюдатель.</p>
+      <div class="pz-row">${[1, 2, 3, 4, 5, 6].map((n) => `<button class="${v.moonsAnswer === n ? 'on' : 'ghost'}" data-act="moons" data-value="${n}">${n}</button>`).join('')}</div>`;
+    bind(el, act);
+    return;
+  }
   el.innerHTML = v.solved
     ? '<p class="ok">Модель подтверждена наблюдениями!</p>'
     : `<p>⚙️ Мастерская. Ночь <b>${v.night + 1} из ${v.nights}</b>. Ты не видишь неба — настрой модель по описанию Наблюдателя.</p>
@@ -173,8 +209,12 @@ function newtonObserver(el: HTMLElement, v: NewtonObserverView) {
   const sx = 280 / 70;
   const sy = 3;
   const last = v.shots.at(-1);
+  const sock = Math.min(1, Math.abs(v.wind) / 3);
   el.innerHTML = `
-    <p>🎯 Ты у поля мишеней. Мишень на <b>${fmt(v.target)} м</b> от пушки (допуск ±${v.tolerance} м).</p>
+    <p>🎯 Мишень <b>${v.round + 1} из ${v.rounds}</b>: на <b>${fmt(v.target)} м</b> от пушки (допуск ±${v.tolerance} м).</p>
+    <p>🌬 Флюгер: ветер <b>${v.wind === 0 ? 'штиль' : `${fmt(Math.abs(v.wind))} м/с ${v.wind > 0 ? 'попутный (к мишени)' : 'встречный (к пушке)'}`}</b>
+      <svg viewBox="0 0 60 20" width="60" height="20" style="vertical-align:middle"><line x1="5" y1="10" x2="55" y2="10" stroke="#8aa" stroke-dasharray="2 2"/>
+      <polygon points="${v.wind >= 0 ? `30,4 ${30 + 25 * sock},10 30,16` : `30,4 ${30 - 25 * sock},10 30,16`}" fill="#ff7a1a"/></svg></p>
     <svg viewBox="0 0 300 130" class="pz-svg">
       <line x1="10" y1="118" x2="295" y2="118" stroke="#5d8743" stroke-width="3"/>
       <rect x="${10 + (v.target - v.tolerance) * sx}" y="104" width="${2 * v.tolerance * sx}" height="14" fill="#c0392b" opacity=".35"/>
@@ -205,7 +245,7 @@ function newtonMechanic(el: HTMLElement, v: NewtonMechanicView, act: Act) {
             <circle cx="40" cy="96" r="14" fill="none" stroke="#5a3a1a" stroke-width="4"/>`;
   };
   el.innerHTML = `
-    <p>💣 Ты у пушки на холме. Полёта ядра <b>не видно</b> — Наблюдатель скажет, куда оно упало.</p>
+    <p>💣 Мишень ${v.round + 1} из ${v.rounds}. Полёта ядра и ветра <b>не видно</b> — Наблюдатель скажет, куда оно упало.</p>
     <svg viewBox="0 0 200 110" class="pz-svg" id="nw-svg">${barrel(v.angle)}</svg>
     <div class="pz-row">Скорость: <input type="range" min="${v.speedRange[0]}" max="${v.speedRange[1]}" step="0.1" value="${v.speed}" data-act="speed" id="nw-s"/><b id="nw-s-l">${fmt(v.speed)} м/с</b></div>
     <div class="pz-row">Угол: <input type="range" min="${v.angleRange[0]}" max="${v.angleRange[1]}" step="1" value="${v.angle}" data-act="angle" id="nw-a"/><b id="nw-a-l">${v.angle}°</b></div>
@@ -218,8 +258,14 @@ function newtonMechanic(el: HTMLElement, v: NewtonMechanicView, act: Act) {
 // ───────────────────────── Тьюринг
 
 let cribOffset = 0;
+let cribIntercept = -1;
 
 function enigmaObserver(el: HTMLElement, v: EnigmaObserverView, act: Act) {
+  // Новый перехват — ползунок crib снова с начала.
+  if (v.intercept !== cribIntercept) {
+    cribIntercept = v.intercept;
+    cribOffset = 0;
+  }
   const max = v.cipher.length - v.crib.length;
   cribOffset = Math.min(cribOffset, max);
   const pos = v.cribPos ?? cribOffset;
@@ -232,7 +278,7 @@ function enigmaObserver(el: HTMLElement, v: EnigmaObserverView, act: Act) {
   if (v.stage === 'crib') {
     const clashes = [...v.cipher].filter((_, i) => clash(i)).length;
     body = `
-      <p>📻 Перехват. Утренняя сводка всегда содержит <b>${v.crib}</b>. Буква в Энигме никогда не шифруется сама в себя — красные совпадения означают «здесь не может быть».</p>
+      <p>📻 Перехват <b>${v.intercept + 1} из ${v.intercepts}</b>. Утренняя сводка всегда содержит <b>${v.crib}</b>. Буква в Энигме никогда не шифруется сама в себя — красные совпадения означают «здесь не может быть».</p>
       <div class="pz-mono"><div>${cells(v.cipher, (i) => (clash(i) ? 'bad' : ''))}</div><div>${cells(cribRow, (i) => (clash(i) ? 'bad' : i >= pos && i < pos + v.crib.length ? 'crib' : ''))}</div></div>
       <div class="pz-row"><button class="ghost" id="en-l">◀</button><span>позиция <b>${pos + 1}</b> · совпадений: <b class="${clashes ? 'bad' : 'ok'}">${clashes}</b></span><button class="ghost" id="en-r">▶</button></div>
       <button id="en-here">${v.crib} здесь!</button>`;
@@ -266,7 +312,7 @@ function enigmaObserver(el: HTMLElement, v: EnigmaObserverView, act: Act) {
 function enigmaMechanic(el: HTMLElement, v: EnigmaMechanicView, act: Act) {
   const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   el.innerHTML = `
-    <p>⚙️ «Бомба». Ротор 1 шифрует позиции 1, 4, 7…, ротор 2 — 2, 5, 8…, ротор 3 — 3, 6, 9…</p>
+    <p>⚙️ «Бомба», перехват ${v.intercept + 1} из ${v.intercepts}. Ротор 1 шифрует позиции 1, 4, 7…, ротор 2 — 2, 5, 8…, ротор 3 — 3, 6, 9…</p>
     ${v.rotors
       .map(
         (r, i) => `

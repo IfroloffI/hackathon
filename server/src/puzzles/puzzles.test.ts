@@ -3,71 +3,91 @@ import assert from 'node:assert/strict';
 import type {
   EnigmaMechanicView,
   EnigmaObserverView,
+  EratMechanicView,
+  EratObserverView,
+  GalileoObserverView,
   NewtonObserverView,
-  RocketStage,
 } from '@chronolet/shared';
 import { EratosthenesPuzzle } from './eratosthenes.ts';
-import { GalileoPuzzle, litFraction, phaseOf } from './galileo.ts';
+import { CLOUD_MS, GalileoPuzzle, litFraction, phaseOf } from './galileo.ts';
 import { NewtonPuzzle } from './newton.ts';
 import { EnigmaPuzzle, encrypt, decrypt, cribCandidates, CRIB } from './enigma.ts';
-import { KorolevPuzzle, ROCKET, rocketMass, simulate } from './korolev.ts';
+import { KorolevPuzzle, VARIANTS, rocketConfigs, simulate } from './korolev.ts';
 
 const keys = (v: unknown) => Object.keys(v as object);
 
-test('Эратосфен: угол → окружность, роли видят разное', () => {
-  const p = new EratosthenesPuzzle();
-  assert.ok(!keys(p.view('observer')).includes('shadow'), 'Наблюдатель не видит угол тени');
-  assert.ok(!keys(p.view('mechanic')).includes('distance'), 'Механик не видит расстояние');
-  assert.equal(p.act('observer', 'answer', 250000), null, 'ответ до фиксации угла игнорируется');
+test('Эратосфен: угол → счёты → подтверждение; роли видят разное', () => {
+  for (let run = 0; run < 10; run++) {
+    const p = new EratosthenesPuzzle();
+    const o = p.view('observer') as EratObserverView;
+    const m = p.view('mechanic') as EratMechanicView;
+    assert.ok(!keys(o).includes('shadow') && !keys(m).includes('distance'), 'асимметрия данных');
+    assert.equal(p.act('mechanic', 'abacus', 1), null, 'до фиксации угла счёты недоступны');
 
-  p.act('mechanic', 'arc', 9);
-  assert.equal(p.act('mechanic', 'lock', null)?.event, 'attempt_failed');
-  p.act('mechanic', 'arc', 7.1);
-  assert.equal(p.act('mechanic', 'lock', null)?.event, 'stage_passed');
-  assert.equal(p.act('mechanic', 'answer', 250000), null, 'Механик не вводит ответ');
-  assert.equal(p.act('observer', 'answer', 200000)?.event, 'attempt_failed');
-  assert.equal(p.act('observer', 'answer', 252000)?.event, 'solved');
-  assert.equal(p.attempts, 2);
+    p.act('mechanic', 'arc', m.shadow + 1);
+    assert.equal(p.act('mechanic', 'lock', null)?.event, 'attempt_failed');
+    p.act('mechanic', 'arc', m.shadow);
+    assert.equal(p.act('mechanic', 'lock', null)?.event, 'stage_passed');
+
+    const answer = (o.distance * 360) / m.shadow;
+    assert.equal(p.act('mechanic', 'abacus', answer * 1.2)?.event, 'stage_passed', 'набрал неверно');
+    assert.equal((p.view('observer') as EratObserverView).abacus, Math.round(answer * 1.2), 'Наблюдатель видит счёты');
+    assert.equal(p.act('observer', 'confirm', true)?.event, 'attempt_failed', 'неверное число не принимается');
+    p.act('mechanic', 'abacus', answer);
+    assert.equal(p.act('observer', 'confirm', false)?.event, undefined, 'можно вернуть на пересчёт');
+    p.act('mechanic', 'abacus', answer);
+    assert.equal(p.act('observer', 'confirm', true)?.event, 'solved');
+    assert.equal(p.stagesPassed, 4);
+  }
 });
 
-test('Галилей: в геоцентрической схеме нет ни половины, ни полного диска', () => {
+test('Галилей: в геоцентрической схеме нет ни половины, ни почти полного, ни полного диска', () => {
   const geo = new Set(Array.from({ length: 360 }, (_, a) => phaseOf(litFraction('geo', a))));
-  assert.ok(!geo.has('half') && !geo.has('full'), `geo даёт: ${[...geo]}`);
+  for (const ph of ['half', 'gibbous', 'full']) assert.ok(!geo.has(ph as never), `geo даёт ${ph}`);
   const helio = new Set(Array.from({ length: 360 }, (_, a) => phaseOf(litFraction('helio', a))));
-  for (const ph of ['crescent', 'half', 'full'] as const) assert.ok(helio.has(ph), `helio не даёт ${ph}`);
+  for (const ph of ['crescent', 'half', 'gibbous', 'full']) assert.ok(helio.has(ph as never), `helio не даёт ${ph}`);
 });
 
-test('Галилей: решается только в гелиоцентрической схеме', () => {
-  const p = new GalileoPuzzle();
-  assert.ok(!keys(p.view('observer')).includes('scheme'));
+test('Галилей: четыре ночи, облака в третью, потом спутники Юпитера', () => {
+  let now = 1_000_000;
+  const p = new GalileoPuzzle(() => now);
   assert.ok(!keys(p.view('mechanic')).includes('phase'));
-  const findAngle = (scheme: 'geo' | 'helio', phase: string) =>
-    Array.from({ length: 360 }, (_, a) => a).find((a) => phaseOf(litFraction(scheme, a)) === phase);
-
-  p.act('mechanic', 'angle', findAngle('geo', 'crescent'));
-  assert.equal(p.act('mechanic', 'observe', null)?.event, 'stage_passed', 'серп возможен и в geo');
-  p.act('mechanic', 'angle', 90);
-  const miss = p.act('mechanic', 'observe', null);
-  assert.equal(miss?.event, 'attempt_failed', 'половина в geo невозможна');
-  assert.ok(!/серп|диск|половин/.test(miss?.message ?? ''), 'публичное сообщение не раскрывает фазу модели');
+  const angleFor = (phase: string) => Array.from({ length: 360 }, (_, a) => a).find((a) => phaseOf(litFraction('helio', a)) === phase)!;
   p.act('mechanic', 'scheme', 'helio');
-  p.act('mechanic', 'angle', findAngle('helio', 'half'));
-  assert.equal(p.act('mechanic', 'observe', null)?.event, 'stage_passed');
-  p.act('mechanic', 'angle', 180);
-  assert.equal(p.act('mechanic', 'observe', null)?.event, 'solved');
-  assert.equal(p.act('observer', 'scheme', 'geo'), null, 'Наблюдатель модель не трогает');
+  for (let night = 0; night < 4; night++) {
+    const o = p.view('observer') as GalileoObserverView;
+    if (night === 2) {
+      assert.ok(o.clouds && o.phase === null, 'в третью ночь облака скрывают фазу');
+      assert.equal(p.nextChangeAt(), now + CLOUD_MS);
+      assert.equal(p.act('mechanic', 'observe', null)?.event, undefined, 'в облака наблюдать нельзя, но это не ошибка');
+      now += CLOUD_MS;
+    }
+    const phase = (p.view('observer') as GalileoObserverView).phase!;
+    p.act('mechanic', 'angle', angleFor(phase));
+    assert.equal(p.act('mechanic', 'observe', null)?.event, 'stage_passed', `ночь ${night + 1}`);
+  }
+  const o = p.view('observer') as GalileoObserverView;
+  assert.equal(o.stage, 'moons');
+  assert.ok(o.moons && o.moons[0].length === 4, 'Наблюдатель видит луны');
+  assert.ok(!keys(p.view('mechanic')).includes('moons'), 'Механик лун не видит');
+  assert.equal(p.act('mechanic', 'moons', 3)?.event, 'attempt_failed');
+  assert.equal(p.act('mechanic', 'moons', 4)?.event, 'solved');
 });
 
-test('Ньютон: Механик не видит полёта, Наблюдатель видит; попадание решает', () => {
-  const p = new NewtonPuzzle(40);
-  assert.ok(!keys(p.view('mechanic')).includes('shots') && !keys(p.view('mechanic')).includes('target'));
+test('Ньютон: ветер видит только Наблюдатель, две мишени подряд', () => {
+  const p = new NewtonPuzzle(Math.random, [30, 45], [2, -1.5]);
+  assert.ok(!keys(p.view('mechanic')).includes('wind') && !keys(p.view('mechanic')).includes('target'));
+  /** Скорость при 45°: (v·cos45 + w)·2v·sin45/g = T → v² + √2·w·v − g·T = 0. */
+  const speedFor = (T: number, w: number) => (-Math.SQRT2 * w + Math.sqrt(2 * w * w + 4 * 9.81 * T)) / 2;
   p.act('mechanic', 'angle', 45);
-  p.act('mechanic', 'speed', 15);
-  assert.equal(p.act('mechanic', 'fire', null)?.event, 'attempt_failed');
-  assert.equal((p.view('observer') as NewtonObserverView).shots.length, 1);
-  const v = Math.sqrt(40 * 9.81); // дальность при 45° = v²/g
-  p.act('mechanic', 'speed', v);
-  assert.equal(p.act('mechanic', 'fire', null)?.event, 'solved');
+  p.act('mechanic', 'speed', Math.sqrt(30 * 9.81)); // без учёта ветра — промах
+  assert.equal(p.act('mechanic', 'fire', null)?.event, 'attempt_failed', 'ветер сносит');
+  for (const round of [0, 1]) {
+    const o = p.view('observer') as NewtonObserverView;
+    assert.equal(o.round, round);
+    p.act('mechanic', 'speed', speedFor(o.target, o.wind));
+    assert.equal(p.act('mechanic', 'fire', null)?.event, round === 0 ? 'stage_passed' : 'solved');
+  }
 });
 
 test('Энигма: буква никогда не шифруется в себя, расшифровка обратна', () => {
@@ -80,61 +100,43 @@ test('Энигма: буква никогда не шифруется в себ�
   }
 });
 
-test('Энигма: решение по crib, данные ролей разделены', () => {
-  for (let run = 0; run < 20; run++) {
+test('Энигма: два перехвата с разными ключами, данные ролей разделены', () => {
+  for (let run = 0; run < 10; run++) {
     const p = new EnigmaPuzzle();
-    assert.ok(cribCandidates(p.cipher).includes(p.cribPos), 'настоящая позиция не отброшена правилом');
-    const obs = p.view('observer') as EnigmaObserverView;
-    assert.ok(!keys(p.view('mechanic')).includes('cipher'), 'Механик не видит перехват');
-    assert.equal(obs.cribPos, null);
-
-    const wrong = (p.cribPos + 1) % (p.cipher.length - CRIB.length);
-    assert.equal(p.act('observer', 'crib', wrong)?.event, 'attempt_failed');
-    assert.equal(p.act('observer', 'crib', p.cribPos)?.event, 'stage_passed');
-
-    // Наблюдатель диктует пары, Механик подбирает роторы по своим таблицам.
-    const o = p.view('observer') as EnigmaObserverView;
-    for (let r = 0; r < 3; r++) {
-      const i = [...Array(CRIB.length).keys()].map((t) => t + o.cribPos!).find((pos) => pos % 3 === r)!;
-      const plain = CRIB[i - o.cribPos!];
-      const want = o.cipher[i];
-      for (let v = 1; v <= 25; v++) {
-        p.act('mechanic', 'rotor', { index: r, value: v });
-        const table = (p.view('mechanic') as EnigmaMechanicView).tables[r];
-        if (table[plain.charCodeAt(0) - 65] === want) break;
+    for (let n = 0; n < 2; n++) {
+      const o0 = p.view('observer') as EnigmaObserverView;
+      assert.equal(o0.intercept, n);
+      assert.ok(cribCandidates(o0.cipher).includes(p.cribPos));
+      assert.ok(!keys(p.view('mechanic')).includes('cipher'), 'Механик не видит перехват');
+      const wrong = cribCandidates(o0.cipher).find((x) => x !== p.cribPos) ?? (p.cribPos + 1) % (o0.cipher.length - CRIB.length);
+      assert.equal(p.act('observer', 'crib', wrong)?.event, 'attempt_failed');
+      assert.equal(p.act('observer', 'crib', p.cribPos)?.event, 'stage_passed');
+      const o = p.view('observer') as EnigmaObserverView;
+      for (let r = 0; r < 3; r++) {
+        const i = [...Array(CRIB.length).keys()].map((t) => t + o.cribPos!).find((pos) => pos % 3 === r)!;
+        const want = o.cipher[i];
+        for (let v = 1; v <= 25; v++) {
+          p.act('mechanic', 'rotor', { index: r, value: v });
+          if ((p.view('mechanic') as EnigmaMechanicView).tables[r][CRIB.charCodeAt(i - o.cribPos!) - 65] === want) break;
+        }
       }
+      assert.equal(p.act('mechanic', 'check', null)?.event, n === 0 ? 'stage_passed' : 'solved');
     }
-    assert.equal(p.act('mechanic', 'check', null)?.event, 'solved');
   }
 });
 
-function* configs(maxStages: number): Generator<RocketStage[]> {
-  const opts: RocketStage[] = [];
-  for (let t = 1; t <= ROCKET.maxTanks; t++) for (const e of ['A', 'B'] as const) opts.push({ tanks: t, engine: e });
-  if (maxStages >= 1) for (const a of opts) yield [a];
-  if (maxStages >= 2) for (const a of opts) for (const b of opts) yield [a, b];
-  if (maxStages >= 3) for (const a of opts) for (const b of opts) for (const c of opts) yield [a, b, c];
-}
-
-test('Королёв: ни одна 1–2-ступенчатая ракета не выходит на орбиту, 3-ступенчатая — может', () => {
-  for (const c of configs(2)) {
-    const r = simulate(c);
-    assert.ok(!r.ok, `неожиданно хватило ${c.length} ступеней: ${JSON.stringify(c)} → ${r.total}`);
+test('Королёв: каждый вариант корабля и стола решается только тремя ступенями', () => {
+  assert.ok(VARIANTS.length >= 4, `вариантов: ${VARIANTS.length}`);
+  for (const v of VARIANTS) {
+    for (const c of rocketConfigs(2)) assert.ok(!simulate(c, v).ok, `${JSON.stringify(v)}: хватило ${c.length} ступеней`);
+    const p = new KorolevPuzzle(Math.random, v);
+    assert.ok(!keys(p.view('mechanic')).includes('required'), 'Механик не видит Δv');
+    const fail = p.act('mechanic', 'launch', null);
+    assert.equal(fail?.event, 'attempt_failed');
+    assert.ok(!/\d/.test(fail?.message ?? ''), 'публичное сообщение без телеметрии');
+    let found: ReturnType<typeof rocketConfigs> extends Generator<infer T> ? T : never = [];
+    for (const c of rocketConfigs(3)) if (c.length === 3 && simulate(c, v).ok) { found = c; break; }
+    found.forEach((s, i) => p.act('mechanic', 'stage', { index: i, tanks: s.tanks, engine: s.engine }));
+    assert.equal(p.act('mechanic', 'launch', null)?.event, 'solved');
   }
-  let found = 0;
-  for (const c of configs(3)) if (simulate(c).ok) found++;
-  assert.ok(found > 0, 'нет решения из 3 ступеней');
-});
-
-test('Королёв: подсказка 3-го уровня даёт рабочую ракету; Механик не видит Δv', () => {
-  const p = new KorolevPuzzle();
-  assert.ok(!keys(p.view('mechanic')).includes('required'));
-  const fail = p.act('mechanic', 'launch', null);
-  assert.equal(fail?.event, 'attempt_failed', 'стартовая конфигурация не летит');
-  assert.ok(!/\d/.test(fail?.message ?? ''), 'публичное сообщение без телеметрии');
-  p.act('mechanic', 'stage', { index: 0, tanks: 6, engine: 'B' });
-  p.act('mechanic', 'stage', { index: 1, tanks: 3, engine: 'B' });
-  p.act('mechanic', 'stage', { index: 2, tanks: 1, engine: 'A' });
-  assert.ok(rocketMass([{ tanks: 6, engine: 'B' }, { tanks: 3, engine: 'B' }, { tanks: 1, engine: 'A' }]) <= ROCKET.massLimit);
-  assert.equal(p.act('mechanic', 'launch', null)?.event, 'solved');
 });

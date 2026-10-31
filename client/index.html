@@ -9,64 +9,140 @@
   <body>
     <div id="game"></div>
 
-    <section id="lobby" class="panel">
-      <h1>ХРОНОЛЁТ</h1>
-      <p class="sub">кооперативное путешествие по истории науки</p>
+    <!-- ── Лобби: светлая тема в духе VKUI ── -->
+    <section id="lobby">
+      <div class="lobby-grid">
+        <div class="vk-card lobby-main">
+          <header class="vk-header">
+            <span class="vk-logo">VK</span>
+            <div>
+              <h1>Хронолёт</h1>
+              <p class="vk-sub">кооперативное путешествие по истории науки</p>
+            </div>
+          </header>
 
-      <label>Твоё имя
-        <input id="name" maxlength="20" placeholder="Например, Ада" autocomplete="off" />
-      </label>
+          <div class="vk-group">
+            <label class="vk-field-label" for="name">Твоё имя</label>
+            <input id="name" class="vk-input" maxlength="20" placeholder="Например, Ада" autocomplete="off" />
+          </div>
 
-      <div class="row">
-        <input id="crew" maxlength="40" placeholder="Название экипажа (необязательно)" autocomplete="off" />
-        <button id="create">Создать комнату</button>
+          <div class="vk-group">
+            <div class="vk-group-title">Новый экипаж</div>
+            <input id="crew" class="vk-input" maxlength="40" placeholder="Название экипажа (необязательно)" autocomplete="off" />
+            <label class="vk-check">
+              <input type="checkbox" id="public" />
+              <span>Публичная комната — видна по сети</span>
+            </label>
+            <button id="create" class="vk-btn vk-btn-primary vk-btn-wide">Создать комнату</button>
+          </div>
+
+          <div class="vk-group">
+            <div class="vk-group-title">Войти к друзьям</div>
+            <div class="vk-row">
+              <input id="code" class="vk-input code" maxlength="4" placeholder="КОД" autocomplete="off" />
+              <button id="join" class="vk-btn vk-btn-secondary">Войти по коду</button>
+            </div>
+          </div>
+
+          <div class="vk-group">
+            <div class="vk-group-title">Открытые комнаты <button id="refresh" class="vk-btn vk-btn-tertiary" title="Обновить">↻</button></div>
+            <ul id="rooms" class="vk-list"><li class="muted">загрузка…</li></ul>
+          </div>
+          <p id="error" class="error"></p>
+        </div>
+
+        <aside class="vk-card lobby-side">
+          <div class="vk-group-title">🏆 Рейтинг хронавтов</div>
+          <ol id="leaderboard" class="vk-list rating"><li class="muted">пока пусто — сыграйте первыми</li></ol>
+          <div class="vk-group-title">Как играть</div>
+          <ul class="howto">
+            <li>🧭 Брифинг у местного учёного, потом — к кругам ролей</li>
+            <li>🔭 Наблюдатель видит данные, 🔧 Механик крутит механизм — говорите!</li>
+            <li><span class="vk-coin">VK</span> Собирай сферы VK Coin — в магазине маскоты</li>
+            <li>❤️ Лайкай экипаж, жми 1–6 — стикеры над головой</li>
+            <li>💬 «@Галилей вопрос» в чате — спросить учёного</li>
+          </ul>
+        </aside>
       </div>
-      <label class="check muted">
-        <input type="checkbox" id="public" />
-        публичная — маячит по UDP в локалке
-      </label>
-
-      <div class="row">
-        <input id="code" maxlength="4" placeholder="КОД" autocomplete="off" class="code" />
-        <button id="join">Войти по коду</button>
-      </div>
-
-      <h2>Открытые комнаты <button id="refresh" class="ghost" title="Обновить">↻</button></h2>
-      <ul id="rooms"><li class="muted">загрузка…</li></ul>
-      <p id="error" class="error"></p>
     </section>
 
+    <!-- ── Игровой HUD: тёмная тема ВК поверх 3D ── -->
     <section id="hud" hidden>
-      <div class="panel hud-top">
-        <span>Комната <b id="room-code"></b></span>
+      <header class="hud-top vk-dark-card">
+        <div class="me">
+          <span id="me-avatar" class="avatar"></span>
+          <div class="me-info">
+            <div><b id="me-name"></b> <span id="xp-level" class="vk-badge">ур. 1</span></div>
+            <div class="xp"><span id="xp-bar"></span></div>
+          </div>
+        </div>
+        <span class="sep"></span>
+        <span class="room">Комната <b id="room-code"></b></span>
         <span id="crew-name" class="muted"></span>
-        <span id="location"></span>
+        <span id="location" class="location"></span>
         <ul id="parts" title="Детали хроно-двигателя"></ul>
-        <span id="net-status" class="ok">online</span>
-        <button id="invite">Скопировать приглашение</button>
-        <button id="leave" class="ghost">Выйти</button>
-      </div>
-      <ul id="crew-list" class="panel"></ul>
-      <div id="chat" class="panel">
+        <span id="wallet" title="VK Coin — собирай сферы на уровнях, трать в магазине на борту"><span class="vk-coin">VK</span> <b id="coin-count">0</b></span>
+        <span id="net-status" class="ok">● online</span>
+        <span class="grow"></span>
+        <button id="rating-btn" class="vk-btn vk-btn-tertiary" title="Рейтинг">🏆</button>
+        <button id="invite" class="vk-btn vk-btn-primary">Пригласить</button>
+        <button id="leave" class="vk-btn vk-btn-tertiary">Выйти</button>
+      </header>
+
+      <aside class="hud-right">
+        <section id="objective" class="vk-dark-card" hidden>
+          <div class="obj-head"><span id="obj-title"></span><span id="obj-timer" class="obj-timer"></span></div>
+          <div id="obj-goal"></div>
+          <div class="obj-progress"><span id="obj-progress"></span></div>
+        </section>
+        <ul id="crew-list" class="vk-dark-card"></ul>
+      </aside>
+
+      <div id="chat" class="vk-dark-card">
         <ul id="chat-log"></ul>
-        <input id="chat-input" maxlength="300" placeholder="Enter — написать" autocomplete="off" />
+        <input id="chat-input" class="vk-input dark" maxlength="300" placeholder="Enter — написать · @Галилей — спросить" autocomplete="off" />
       </div>
-      <p id="toast" class="panel" hidden></p>
-      <p id="subtitle" class="panel" hidden></p>
+
+      <div id="emotes" class="vk-dark-card" title="Стикеры: клавиши 1–6"></div>
+      <div id="toasts"></div>
+      <p id="toast" class="vk-dark-card" hidden></p>
+      <p id="subtitle" class="vk-dark-card" hidden></p>
       <p id="prompt" hidden></p>
-      <section id="puzzle" class="panel" hidden>
+
+      <section id="puzzle" class="vk-dark-card" hidden>
         <div id="puzzle-head"></div>
         <div id="puzzle-body"></div>
       </section>
+
+      <section id="shop" class="vk-dark-card modal" hidden>
+        <div class="shop-head">
+          <h3>Маскоты и скины</h3>
+          <span><span class="vk-coin">VK</span> <b id="shop-balance">0</b> VK Coin</span>
+          <button id="shop-close" class="vk-btn vk-btn-tertiary" title="Закрыть (Esc)">✕</button>
+        </div>
+        <ul id="shop-list"></ul>
+        <p id="shop-status"></p>
+      </section>
+
+      <section id="rating" class="vk-dark-card modal" hidden>
+        <div class="shop-head">
+          <h3>🏆 Рейтинг хронавтов</h3>
+          <button id="rating-close" class="vk-btn vk-btn-tertiary" title="Закрыть (Esc)">✕</button>
+        </div>
+        <ol id="rating-list" class="vk-list rating dark"></ol>
+        <div class="vk-group-title">Мои значки</div>
+        <ul id="my-badges" class="badges"></ul>
+      </section>
+
       <section id="finale" hidden>
-        <div class="panel">
+        <div class="vk-dark-card">
           <h2>Хроно-двигатель починен!</h2>
           <p>Пять эпох, пять деталей: гномон Эратосфена, линза Галилея, маятник Ньютона, ротор Тьюринга и топливный элемент Королёва.</p>
           <p>Хронолёт берёт курс домой. Спасибо, экипаж!</p>
           <p class="muted">ХРОНОС: «Я почти горжусь вами».</p>
         </div>
       </section>
-      <p class="help">A/D или ←/→ — бег · W/S — глубина · Пробел — прыжок · E — действие у светящегося круга</p>
+      <p class="help">A/D — бег · W/S — глубина · Пробел — прыжок · E — действие · 1–6 — стикеры · синие сферы — VK Coin</p>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

@@ -5,7 +5,9 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { createAuthContext, matchMaker, ServerError } from 'colyseus';
 import { CREW_ROOM, type ManagedRoomInfo, type RoomListing } from '@chronolet/shared';
-import { sessions, players } from '../db/repositories.ts';
+import { sessions, players, profiles } from '../db/repositories.ts';
+import { registerLlmRoutes } from '../llm/routes.ts';
+import { timeseries } from '../timeseries/store.ts';
 import { config } from '../config.ts';
 import { getBearerToken, issueToken, revokeToken, verifyToken, type VerifiedPlayer } from '../auth/tokens.ts';
 import * as roomManager from '../rooms/roomManager.ts';
@@ -153,7 +155,12 @@ export async function buildApp(httpServer: HttpServer): Promise<FastifyInstance>
 
   // ---------- debug / service ----------
 
-  app.get('/api/health', async () => ({ ok: true, ts: Date.now() }));
+  app.get('/api/health', async () => ({ ok: true, ts: Date.now(), series: await timeseries.counts() }));
+
+  /** Рейтинг экипажей по XP — для лобби и экрана на борту. */
+  app.get('/api/leaderboard', async () => profiles.leaderboard(20));
+
+  registerLlmRoutes(app);
 
   app.get('/api/host', async () => ({ addresses: lanAddresses() }));
 

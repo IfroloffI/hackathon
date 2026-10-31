@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import {
   ClientMsg,
+  EMOTES,
+  type EmoteBroadcast,
+  type LikeBroadcast,
   MOVE_SEND_HZ,
   ServerMsg,
   getLevel,
@@ -67,10 +70,21 @@ export class Game {
         );
       }),
       room.onMessage(ServerMsg.Teleport, (t: TeleportPayload) => this.onTeleport(t)),
+      room.onMessage(ServerMsg.Emote, (m: EmoteBroadcast) => this.viewOf(m.sessionId)?.showBubble(EMOTES[m.emote] ?? '❔')),
+      room.onMessage(ServerMsg.Like, (m: LikeBroadcast) => this.viewOf(m.to)?.showBubble('❤️', 1800)),
+      $.onAdd('coinsTaken', (id) => this.world?.popCoin(String(id)), false),
     );
 
     this.ensureWorld(room.state.levelId || 'hub');
     this.loop();
+  }
+
+  /** Открыть магазин скинов (E у терминала на борту). Подключается в main.ts. */
+  onShop?: () => void;
+
+  /** Рядом ли игрок со станцией данного вида — магазин закрывается, если отойти. */
+  isNear(kind: Station['kind']): boolean {
+    return this.nearStation?.kind === kind;
   }
 
   /** Отключить управление (например, пока печатаешь в чат). */
@@ -99,6 +113,7 @@ export class Game {
     this.worldLevelId = levelId;
     this.world = buildWorld(this.scene, getLevel(levelId));
     this.world.setParts([...this.room.state.parts]);
+    this.world.hideCoins(this.room.state.coinsTaken ?? []);
     // Пакет телепорта мог прийти раньше патча state — уровень контроллера синхронизируем и здесь.
     if (this.local && this.local.ctrl.level.id !== levelId) {
       this.local.ctrl.setLevel(getLevel(levelId), this.local.state);
@@ -116,7 +131,7 @@ export class Game {
   private addPlayer(sessionId: string, state: NetPlayer) {
     if (sessionId === this.room.sessionId) {
       if (this.local) return; // повторный onAdd после реконнекта
-      const view = new Character(state.name, state.color);
+      const view = new Character(state.name, state.color, { skin: state.skin });
       this.scene.add(view.root);
       const ctrl = new LocalController(getLevel(this.room.state.levelId || 'hub'), state);
       ctrl.enabled = this.inputEnabled;
@@ -136,11 +151,25 @@ export class Game {
     this.remotes.delete(sessionId);
   }
 
+  private viewOf(sessionId: string): Character | undefined {
+    return sessionId === this.room.sessionId ? this.local?.view : this.remotes.get(sessionId)?.view;
+  }
+
+  /** Купил/надел скин — пересобираем своего персонажа. */
+  private rebuildLocalView() {
+    if (!this.local) return;
+    const { state } = this.local;
+    this.local.view.dispose();
+    this.local.view = new Character(state.name, state.color, { skin: state.skin });
+    this.scene.add(this.local.view.root);
+    this.updateRoleBadges();
+  }
+
   private updateRoleBadges() {
     const pz = this.room.state.puzzle;
     const roleOf = (sid: string) => (pz?.observer === sid ? 'observer' : pz?.mechanic === sid ? 'mechanic' : null);
     this.local?.view.setRole(roleOf(this.room.sessionId));
-    this.remotes.forEach((r, sid) => r.view.setRole(roleOf(sid)));
+    this.remotes.forEach((r, sid) => r.setRole(roleOf(sid)));
   }
 
   private loop = () => {
@@ -152,7 +181,8 @@ export class Game {
       const { ctrl, view, state } = this.local;
       ctrl.update(dt);
       if (Math.hypot(state.x - ctrl.x, state.y - ctrl.y) > CORRECTION_THRESHOLD) ctrl.teleport(state);
-      view.setPose(ctrl.x, ctrl.y, ctrl.z, ctrl.facing, ctrl.anim, dt);
+      if (state.skin && state.skin !== view.skinId) this.rebuildLocalView();
+      this.local.view.setPose(ctrl.x, ctrl.y, ctrl.z, ctrl.facing, ctrl.anim, dt);
       this.sendMove(dt);
       this.followCamera(ctrl.x, ctrl.y, dt);
       this.updatePrompt(ctrl);
@@ -186,11 +216,18 @@ export class Game {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (e.code !== 'KeyE' || e.repeat || !this.nearStation || !this.inputEnabled) return;
+    // Магазин — локальная панель; покупки уходят на сервер оттуда.
+    if (this.nearStation.kind === 'shop') return this.onShop?.();
     this.room.send(ClientMsg.Interact, { stationId: this.nearStation.id });
   };
 
   /** Шлём позицию с частотой MOVE_SEND_HZ и только если она изменилась. */
   private sendMove(dt: number) {
+    const fall = this.local?.ctrl.takeFall();
+    if (fall) {
+      this.room.send(ClientMsg.Move, fall);
+      this.lastSent = '';
+    }
     this.sendAcc += dt;
     if (this.sendAcc < 1 / MOVE_SEND_HZ || !this.local) return;
     this.sendAcc = 0;

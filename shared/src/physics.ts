@@ -25,7 +25,14 @@ const halfW = PLAYER_SIZE.w / 2;
 const halfD = PLAYER_SIZE.d / 2;
 const height = PLAYER_SIZE.h;
 
-const edges = (p: Platform) => ({
+const edgeCache = new WeakMap<Platform, ReturnType<typeof computeEdges>>();
+/** Границы платформы кэшируются: уровни неизменяемы, а физика зовёт это сотни раз за кадр. */
+const edges = (p: Platform) => {
+  let e = edgeCache.get(p);
+  if (!e) edgeCache.set(p, (e = computeEdges(p)));
+  return e;
+};
+const computeEdges = (p: Platform) => ({
   left: p.x - p.w / 2,
   right: p.x + p.w / 2,
   bottom: p.y - p.h / 2,

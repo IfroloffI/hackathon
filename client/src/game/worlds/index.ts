@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EPOCHS, type Level } from '@chronolet/shared';
 import { Character } from '../Character.ts';
 import { disposeTree, levelDepth, platformMesh, stationMarker } from './common.ts';
+import { vkCoin, type CoinView } from './vkCoin.ts';
 import type { Decor } from './decor.ts';
 import { decorateHub } from './hub.ts';
 import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua, decorateWoolsthorpe } from './epochs.ts';
@@ -9,6 +10,10 @@ import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua,
 export interface World {
   update(t: number, dt: number): void;
   setParts(parts: string[]): void;
+  /** Спрятать уже собранные сферы (при входе на уровень). */
+  hideCoins(ids: Iterable<string>): void;
+  /** Сферу только что подобрали — анимация «лопнула» и исчезла. */
+  popCoin(id: string): void;
   dispose(): void;
 }
 
@@ -47,6 +52,14 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     return m;
   });
 
+  const coins = new Map<string, CoinView>();
+  const popping = new Set<(t: number) => void>();
+  level.coins.forEach((c, i) => {
+    const view = vkCoin(c.x, c.y, c.z ?? 0, i * 1.3);
+    coins.set(c.id, view);
+    g.add(view.root);
+  });
+
   const npcs: Character[] = [];
   for (const s of level.stations) {
     if (s.kind !== 'narrator' || !s.agent || !NPC_LOOK[s.agent]) continue;
@@ -73,6 +86,8 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
         ring.scale.setScalar(1 + Math.sin(t * 3) * 0.06);
       }
       for (const l of leds) l.visible = Math.sin(t * 2 + l.userData.blink * 1.7) > -0.3;
+      coins.forEach((c) => c.update(t));
+      popping.forEach((f) => f(t));
       for (const n of npcs) {
         const p = n.root.position;
         n.setPose(p.x, p.y, p.z, -1, 'idle', dt);
@@ -80,6 +95,24 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     },
     setParts(parts) {
       decor.setParts?.(parts);
+    },
+    hideCoins(ids) {
+      for (const id of ids) {
+        coins.get(id)?.root.removeFromParent();
+        coins.delete(id);
+      }
+    },
+    popCoin(id) {
+      const c = coins.get(id);
+      if (!c) return;
+      coins.delete(id);
+      // Пока лопается — продолжаем обновлять отдельно.
+      const tick = (t: number) => c.update(t);
+      popping.add(tick);
+      c.pop(() => {
+        popping.delete(tick);
+        c.root.removeFromParent();
+      });
     },
     dispose() {
       npcs.forEach((n) => n.dispose());
