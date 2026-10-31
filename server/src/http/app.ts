@@ -40,6 +40,9 @@ export async function buildApp(httpServer: HttpServer): Promise<FastifyInstance>
 
   await app.register(cors, {
     origin: true,
+    // @colyseus/sdk с authToken шлёт matchmake с credentials: 'include' — без этого браузер
+    // блокирует вход в комнату, когда клиент открыт с другого origin (dev: Vite на :5173).
+    credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
