@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Хронолёт</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <section id="lobby" class="panel">
+      <h1>ХРОНОЛЁТ</h1>
+      <p class="sub">кооперативное путешествие по истории науки</p>
+
+      <label>Твоё имя
+        <input id="name" maxlength="20" placeholder="Например, Ада" autocomplete="off" />
+      </label>
+
+      <div class="row">
+        <input id="crew" maxlength="40" placeholder="Название экипажа (необязательно)" autocomplete="off" />
+        <button id="create">Создать комнату</button>
+      </div>
+
+      <div class="row">
+        <input id="code" maxlength="4" placeholder="КОД" autocomplete="off" class="code" />
+        <button id="join">Войти по коду</button>
+      </div>
+
+      <h2>Открытые комнаты <button id="refresh" class="ghost" title="Обновить">↻</button></h2>
+      <ul id="rooms"><li class="muted">загрузка…</li></ul>
+      <p id="error" class="error"></p>
+    </section>
+
+    <section id="hud" hidden>
+      <div class="panel hud-top">
+        <span>Комната <b id="room-code"></b></span>
+        <span id="crew-name" class="muted"></span>
+        <span id="net-status" class="ok">online</span>
+        <button id="invite">Скопировать приглашение</button>
+        <button id="leave" class="ghost">Выйти</button>
+      </div>
+      <ul id="crew-list" class="panel"></ul>
+      <div id="chat" class="panel">
+        <ul id="chat-log"></ul>
+        <input id="chat-input" maxlength="300" placeholder="Enter — написать" autocomplete="off" />
+      </div>
+      <p id="toast" class="panel" hidden></p>
+      <p class="help">A/D или ←/→ — бег · W/S — глубина · Пробел — прыжок</p>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

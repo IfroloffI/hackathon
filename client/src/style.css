@@ -1,0 +1,82 @@
+:root {
+  --paper: #f3e6cf;
+  --ink: #3b2a1a;
+  --accent: #d26a3a;
+  --muted: #8a7458;
+  font-family: 'Trebuchet MS', system-ui, sans-serif;
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2118; }
+#game { position: fixed; inset: 0; }
+#game canvas { display: block; }
+
+.panel {
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.35);
+}
+button {
+  font: inherit; font-weight: bold;
+  background: var(--accent); color: #fff8ee;
+  border: 2px solid var(--ink); border-radius: 10px;
+  padding: 8px 14px; cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+button.ghost { background: transparent; color: var(--ink); padding: 2px 8px; }
+input {
+  font: inherit; padding: 8px 10px;
+  border: 2px solid var(--ink); border-radius: 10px;
+  background: #fffaf0; color: var(--ink); min-width: 0;
+}
+.muted { color: var(--muted); }
+.error { color: #b3261e; min-height: 1.2em; margin: 4px 0 0; }
+
+#lobby {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+  padding: 20px 24px; display: flex; flex-direction: column; gap: 10px;
+}
+#lobby h1 { margin: 0; letter-spacing: 4px; }
+#lobby h2 { margin: 8px 0 0; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+#lobby .sub { margin: 0 0 6px; color: var(--muted); }
+#lobby label { display: flex; flex-direction: column; gap: 4px; font-weight: bold; }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; }
+.code { text-transform: uppercase; letter-spacing: 4px; max-width: 110px; text-align: center; }
+#rooms { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+#rooms li.room {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 2px dashed var(--muted); border-radius: 10px;
+}
+#rooms .code-tag { font-family: monospace; font-weight: bold; letter-spacing: 2px; }
+
+#hud .hud-top {
+  position: fixed; top: 12px; left: 12px; right: 12px;
+  display: flex; gap: 16px; align-items: center; padding: 8px 14px; flex-wrap: wrap;
+}
+#hud .hud-top #invite { margin-left: auto; }
+#toast {
+  position: fixed; top: 74px; left: 50%; transform: translateX(-50%);
+  margin: 0; padding: 8px 14px; max-width: calc(100vw - 32px); text-align: center;
+}
+#toast code { font-weight: bold; user-select: all; word-break: break-all; }
+#room-code { font-family: monospace; letter-spacing: 3px; font-size: 1.1em; }
+#net-status.ok { color: #2a7a3b; }
+#net-status.bad { color: #b3261e; }
+#crew-list {
+  position: fixed; top: 70px; right: 12px; list-style: none; margin: 0;
+  padding: 8px 12px; min-width: 140px;
+}
+#crew-list li { display: flex; align-items: center; gap: 6px; }
+#crew-list .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--ink); }
+#crew-list .off { opacity: 0.45; }
+#chat {
+  position: fixed; left: 12px; bottom: 36px; width: min(360px, calc(100vw - 24px));
+  padding: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+#chat-log { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; font-size: 0.9rem; }
+#chat-log .sys { color: var(--muted); font-style: italic; }
+.help { position: fixed; bottom: 6px; left: 12px; margin: 0; color: var(--paper); font-size: 0.8rem; opacity: 0.8; }

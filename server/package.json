@@ -1,0 +1,22 @@
+{
+  "name": "@chronolet/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "start": "NODE_ENV=production tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@chronolet/shared": "*",
+    "colyseus": "^0.18.10",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "@colyseus/sdk": "^0.18.8"
+  }
+}
