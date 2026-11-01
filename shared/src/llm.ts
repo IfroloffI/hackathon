@@ -132,6 +132,17 @@ export interface ReplyableData {
 
 // ───────────────────────── REST: LLM → сервер
 
+/**
+ * POST /llm/voice — фраза игрока из расшифровки голоса (transcriber → Redis → LLM-сервис → сервер).
+ * Пока ворота эпохи закрыты, сервер отдаёт её классификатору ответов: «да» — ворота открываются.
+ */
+export interface LlmVoiceRequest {
+  session: string;
+  /** Имя говорящего (как в голосовом чате). */
+  name: string;
+  text: string;
+}
+
 /** POST /llm/say — реплика агента. Стриминг: несколько вызовов с одним streamId, последний с final=true. */
 export interface LlmSayRequest {
   session: string;

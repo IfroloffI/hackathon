@@ -26,6 +26,13 @@ export interface SessionContext {
   /** Собственные последние реплики каждого агента — чтобы не повторяться. */
   said: Map<string, string[]>;
   comments: number;
+  /** Когда пришёл последний снимок: давно не было — комната закрыта. */
+  snapshotAt: number;
+  /** Последняя подсказка ХРОНОСа по трассе — не повторять её без прогресса. */
+  lastHint: string;
+  lastHintAt: number;
+  /** Ворота эпохи уже открыты — вопрос у ворот больше не тема для разговора. */
+  gateOpen: boolean;
 }
 
 const RECENT = 8;
@@ -36,7 +43,7 @@ const sessions = new Map<string, SessionContext>();
 export function ctx(session: string): SessionContext {
   let c = sessions.get(session);
   if (!c) {
-    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, answeredUpTo: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0 };
+    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, answeredUpTo: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0, snapshotAt: Date.now(), lastHint: '', lastHintAt: 0, gateOpen: false };
     sessions.set(session, c);
   }
   return c;
@@ -69,7 +76,10 @@ export function markAnswered(c: SessionContext) {
 
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2));
 
-/** Похожа ли реплика на одну из прошлых (доля общих слов) — тогда лучше промолчать, чем повториться. */
+/**
+ * Похожа ли реплика на одну из прошлых (Жаккар по словам) — тогда лучше переспросить модель или промолчать.
+ * Общие имена и пара слов («admiok», «Механик») повтором не считаются — нужен почти тот же текст.
+ */
 export function tooSimilar(text: string, previous: string[], threshold = 0.5): boolean {
   const a = words(text);
   if (!a.size) return false;
@@ -77,7 +87,7 @@ export function tooSimilar(text: string, previous: string[], threshold = 0.5): b
     const b = words(p);
     let common = 0;
     for (const w of a) if (b.has(w)) common++;
-    return common / Math.min(a.size, b.size || 1) >= threshold;
+    return common / (a.size + b.size - common) >= threshold;
   });
 }
 
@@ -138,6 +148,16 @@ export function remember(e: GameEvent) {
     }
   }
   if (e.type === 'session.end') return forget(e.session);
+  if (e.type === 'level.enter') c.gateOpen = false;
+  if (e.type === 'gate.open') {
+    // Вопрос ворот отвечен: ни свои реплики с вопросом, ни строки о нём в ленте больше не подсказываем модели.
+    c.gateOpen = true;
+    // Фразы, которыми отвечали воротам, — не тема для разговора.
+    markAnswered(c);
+    const agentId = (e.data as { agentId?: string }).agentId;
+    if (agentId) c.said.delete(agentId);
+    c.recent = c.recent.filter((l) => !l.startsWith('рассказчик сказал'));
+  }
   const line = describe(e);
   if (!line) return;
   c.recent.push(line);
@@ -154,6 +174,7 @@ export function situation(s: SessionSnapshot | null, now = Date.now()): string[]
     const sec = Math.round((now - s.scenario.stepStartedAt) / 1000);
     lines.push(`Шаг «${s.scenario.stepTitle}», цель: ${s.scenario.goal}. Идёт ${sec} с${s.scenario.parSeconds ? ` (контроль ${s.scenario.parSeconds} с)` : ''}.`);
   }
+  if (sessions.get(s.session)?.gateOpen) lines.push('Ворота эпохи уже открыты: вопрос у ворот больше не задавай и не упоминай.');
   if (s.puzzle) lines.push(`Головоломка «${s.puzzle.title}»: ${s.puzzle.stage}. Ошибок: ${s.puzzle.attempts}, подсказок: ${s.puzzle.hintsGiven}.`);
   const crew = s.crew
     .filter((m) => m.connected)

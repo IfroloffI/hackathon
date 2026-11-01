@@ -107,9 +107,17 @@ export interface GuideStep {
 }
 
 /**
- * Подсказка по прохождению для экипажа, чей передний край на frontX: текущий участок и следующий.
+ * Подсказка по прохождению для экипажа, чей передний край на frontX: текст текущего участка.
  * Так подсказка «растёт» вместе с прогрессом, а не повторяет начало уровня.
  */
+export function guideStepFor(level: Level, frontX: number): string {
+  const steps = level.guide ?? [];
+  let step = '';
+  for (const s of steps) if (s.x <= frontX + 1) step = s.text;
+  return step || steps[0]?.text || '';
+}
+
+/** Текущий участок и следующий — подсказка «на два шага вперёд». */
 export function guideFor(level: Level, frontX: number): string {
   const steps = level.guide ?? [];
   if (!steps.length) return '';

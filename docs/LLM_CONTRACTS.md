@@ -164,7 +164,7 @@
 
 ## 8. Реализация: `agent-service/` + Ollama
 
-`docker compose up -d` поднимает Ollama с `qwen2.5:3b` и `agent-service` (TypeScript, Node 22). Сервис:
+`docker compose up -d` поднимает Ollama с `qwen2.5:7b` и `agent-service` (TypeScript, Node 22). Сервис:
 слушает поток (с догоном по `since`), отвечает на отвечаемые события и простой (`idle`), собирает промпт
 из `persona` + снимка (`puzzle.stage`, `attempts`, `scenario.goal`, `crew.idleSeconds`) + ленты недавних событий
 + памяти игрока, стримит ответ Ollama кусками, перефразирует подсказки партии (числа обязаны сохраниться — иначе отказ),

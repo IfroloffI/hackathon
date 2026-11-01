@@ -1,5 +1,6 @@
 import { createClient } from 'redis';
 import { config } from './config.ts';
+import { api } from './api.ts';
 import { hearPhrase } from './context.ts';
 
 /**
@@ -65,7 +66,10 @@ export async function startTranscripts() {
     await sub.subscribe('transcripts:live', (raw) => {
       const e = parse(raw);
       if (!e) return;
-      void seedSession(e.roomId).then(() => hearPhrase(e.roomId, toPhrase(e)));
+      const phrase = toPhrase(e);
+      void seedSession(e.roomId).then(() => hearPhrase(e.roomId, phrase));
+      // Ответ на вопрос у ворот можно сказать голосом: сервер сам решает, закрыты ли ворота.
+      void api.voice({ session: e.roomId, name: phrase.name, text: phrase.text }).catch(() => {});
     });
     console.log(`[transcripts] слушаю ${config.redisUrl} transcripts:live`);
   } catch (e) {

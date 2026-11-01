@@ -40,3 +40,8 @@ test('отвеченные фразы второй раз не подаются 
   hearPhrase('S3', { name: 'Боря', text: 'а где ящик?', at: now });
   assert.deepEqual(speechLines(c, now, 4 * 60_000, c.answeredUpTo), ['Боря: «а где ящик?»']);
 });
+
+test('общее имя и пара слов — не повтор', () => {
+  const said = ['admiok теперь Механик. Посмотрим, что из этого выйдет.'];
+  assert.ok(!tooSimilar('admiok, Механик, толкни ящик к скале — по нему залезешь наверх.', said));
+});

@@ -12,6 +12,7 @@ import {
   type LlmHintRequest,
   type LlmMemoryRequest,
   type LlmSayRequest,
+  type LlmVoiceRequest,
   type LlmSeriesResponse,
   type SeriesMetric,
 } from '@chronolet/shared';
@@ -104,6 +105,13 @@ export function registerLlmRoutes(app: FastifyInstance) {
       const ctl = session(req.body?.session, reply);
       if (!ctl) return;
       const ack = ctl.say(req.body);
+      return reply.code(ackStatus(ack)).send(ack);
+    });
+
+    llm.post<{ Body: LlmVoiceRequest }>('/llm/voice', async (req, reply) => {
+      const ctl = session(req.body?.session, reply);
+      if (!ctl) return;
+      const ack = await ctl.voice(req.body);
       return reply.code(ackStatus(ack)).send(ack);
     });
 

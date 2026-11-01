@@ -59,6 +59,15 @@ if [[ ! -f "$CERT_DIR/dev-cert.pem" || ! -f "$CERT_DIR/dev-key.pem" ]]; then
   fi
 fi
 
+# LLM: нативная Ollama на хосте (на Mac — GPU) быстрее Docker-версии в десятки раз. Нет её — поднимаем в Docker.
+if curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && ! docker compose ps --status running ollama 2>/dev/null | grep -q ollama; then
+  echo "[up] LLM: нативная Ollama на хосте (:11434)"
+else
+  echo "[up] LLM: нативной Ollama нет — поднимаю в Docker (медленно; на Mac лучше: brew install ollama && ollama serve)"
+  export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}docker-ollama"
+  export OLLAMA_URL="${OLLAMA_URL:-http://ollama:11434}"
+fi
+
 echo "[up] LAN-IP для голоса: $LIVEKIT_NODE_IP"
 docker compose up -d --build "$@"
 

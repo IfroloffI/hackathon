@@ -27,7 +27,6 @@ import {
   PLAYER_SIZE,
   type GateDef,
   getSkin,
-  guideFor,
   isNearStation,
   levelFromXp,
   stepCrates,
@@ -46,6 +45,7 @@ import {
   type LlmAck,
   type LlmHintRequest,
   type LlmSayRequest,
+  type LlmVoiceRequest,
   type PushPayload,
   type PuzzleActionPayload,
   type PuzzleViewMessage,
@@ -160,6 +160,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   /** Ящики уровня (точная физика) и кто их сейчас толкает: id ящика → направление и срок. */
   private crates: CrateBody[] = [];
   private pushes = new Map<string, { dir: 1 | -1; until: number }>();
+  /** За какие роли уже начислен опыт: «playerId:levelId:role». */
+  private rolesRewarded = new Set<string>();
   /** Награды паркура: «playerId:stationId» — каждому игроку один раз за сессию. */
   private rewardsClaimed = new Set<string>();
 
@@ -210,6 +212,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       snapshot: () => this.snapshot(),
       say: (req) => this.llmSay(req),
       hint: (req) => this.llmHint(req),
+      voice: (req) => this.voiceAnswer(req),
     });
   }
 
@@ -483,6 +486,25 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     if (verdict.accepted) this.openGate(gate, client, `${client.userData?.name ?? 'Кто-то'} ответил верно — ворота открыты!`);
   }
 
+  /**
+   * Ответ воротам голосом: фраза из расшифровки → классификатор. «Да» — ворота открываются, как от ответа в чат;
+   * «нет» молча пропускаем: в голосовом чате говорят много чего, на каждую фразу отказ звучал бы спамом.
+   */
+  private async voiceAnswer(req: LlmVoiceRequest): Promise<LlmAck> {
+    const gate = this.closedGate();
+    const text = typeof req?.text === 'string' ? req.text.trim().slice(0, 300) : '';
+    if (!gate || !text) return { ok: true };
+    const [npc, verdict] = await Promise.all([gateNpcs(), classifyAnswer(gate.agent, text)]);
+    if (this.disposing || this.closedGate() !== gate || !verdict) return { ok: true };
+    const name = typeof req.name === 'string' && req.name.trim() ? req.name.trim().slice(0, 40) : 'Кто-то';
+    this.emit('gate.answer', null, { agentId: gate.agent, text, accepted: verdict.accepted, probability: verdict.probability, voice: true, name });
+    if (!verdict.accepted) return { ok: true };
+    const lines = npc?.[gate.agent];
+    if (lines) this.sayTo(null, gate.agent, lines.accept, 'script');
+    this.openGate(gate, null, `${name} ответил голосом верно — ворота открыты!`);
+    return { ok: true };
+  }
+
   private openGate(gate: GateDef, by: CrewClient | null, text: string) {
     if (this.closedGate() !== gate) return;
     this.state.gatesOpen.push(this.level.id);
@@ -580,19 +602,6 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const e = this.emit('agent.ask', client.sessionId, { agentId, text, ...(listening ? { replyable: true, fallback: null } : {}) });
     if (!listening) return fallback();
     this.defer(e.seq, ASK_TIMEOUT_MS, fallback);
-  }
-
-  /**
-   * E у NPC — подсказка по прохождению уровня всему экипажу: участок трассы, где сейчас передний край
-   * экипажа, и следующий (Level.guide). Звучит сразу и дословно — пересказ маленькой LLM терял суть
-   * и не успевал; характер персонажа — в его репликах раз в ~10 с (agent-service).
-   */
-  private guide(client: CrewClient, agentId: string) {
-    const front = Math.max(...[...this.state.players.values()].filter((p) => p.connected).map((p) => p.x));
-    const text = guideFor(this.level, Number.isFinite(front) ? front : this.level.spawn.x);
-    if (!text) return this.ask(client, agentId, '');
-    this.emit('agent.ask', client.sessionId, { agentId, text: '', guide: text });
-    this.sayTo(null, agentId, `💡 ${text}`, 'script');
   }
 
   /** Отложить заготовку до ответа LLM на событие seq (см. REACT_TIMEOUT_MS в shared/src/llm.ts). */
@@ -727,7 +736,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
         const agent = station.agent ?? SHIP_AI.id;
         // Пока ворота закрыты, хозяин ворот только повторяет вопрос — брифинг после ответа.
         if (this.closedGate()?.agent === agent) return void this.askGateQuestion(client);
-        this.guide(client, agent);
+        this.ask(client, agent, '');
         this.advance(this.scenario.talkedTo(agent, this.facts()));
         return;
       }
@@ -844,7 +853,12 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     pz[role] = sid;
     this.emit('role.take', sid, { role });
     const m = this.member(client);
-    if (m) this.progression.role(m, role);
+    // Опыт и значки — только за первое взятие этой роли в этой эпохе: «взял-сдал-взял» не фармит XP.
+    const key = `${client.userData!.playerId}:${this.level.id}:${role}`;
+    if (m && !this.rolesRewarded.has(key)) {
+      this.rolesRewarded.add(key);
+      this.progression.role(m, role);
+    }
     this.shipSay(SHIP_AI_EVENTS.roleTaken(client.userData!.name, ROLE_NAME[role]));
     if (pz[other] !== sid) client.send(ServerMsg.PuzzleView, { puzzleId: this.puzzle.id, role: null, view: null });
     this.sendViewsTo(client);

@@ -1,7 +1,7 @@
 # agent-service — живые реплики NPC через локальную LLM
 
 Слушает `ws://<сервер>:2567/llm/stream` (контракт `chronolet.llm/1`, [docs/LLM_CONTRACTS.md](../docs/LLM_CONTRACTS.md)),
-генерирует реплики рассказчиков эпох и ХРОНОСа через Ollama (`qwen2.5:3b`) и отвечает через `/llm/say`, `/llm/hint`, `/llm/memory`.
+генерирует реплики рассказчиков эпох и ХРОНОСа через Ollama (`qwen2.5:7b`) и отвечает через `/llm/say`, `/llm/hint`, `/llm/memory`.
 **Правила игры не решает** — только слова. Игра от сервиса не зависит: нет ответа в срок — сервер говорит заготовку.
 
 ## Запуск
@@ -12,7 +12,7 @@ docker compose up -d                # Ollama + модель + agent-service (п�
 docker compose logs -f agent-service
 ```
 
-Без Docker: `ollama serve`, `ollama pull qwen2.5:3b`, `npm start -w agent-service`.
+Без Docker: `ollama serve`, `ollama pull qwen2.5:7b`, `npm start -w agent-service`.
 На Mac нативная Ollama (Metal) в разы быстрее Docker (только CPU):
 `OLLAMA_URL=http://host.docker.internal:11434 docker compose up -d agent-service`.
 
@@ -50,7 +50,7 @@ docker compose logs -f agent-service
 |---|---|---|
 | `SERVER_URL` | `http://127.0.0.1:2567` (в compose — `http://host.docker.internal:2567`) | игровой сервер |
 | `LLM_SERVICE_TOKEN` | `dev-llm-token` | тот же, что у сервера |
-| `OLLAMA_URL` / `OLLAMA_MODEL` | `http://127.0.0.1:11434` / `qwen2.5:3b` | |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | `http://127.0.0.1:11434` / `qwen2.5:7b` | |
 | `FIRST_TOKEN_MS` | 4000 | срок до первого токена |
 | `MAX_TOKENS` | 70 | длина реплики |
 | `PROACTIVE_GAP_MS` | 10000 | пауза между инициативными репликами |
