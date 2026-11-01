@@ -74,6 +74,8 @@ npm run udp-listen -w server      # слушатель UDP-маяков публ
 
 **Расшифровка голосового чата** (LiveKit-агент → Whisper → Redis, вся история по id комнаты): `docker compose up -d transcriber` при запущенном `npm run livekit` (macOS; на Linux — с `-f docker-compose.linux.yml`), подробности в [transcriber/README.md](transcriber/README.md). На macOS LiveKit ставится через `brew install livekit`.
 
+**Вопросы-ворота NPC** (бинарный классификатор, не LLM): `docker compose up -d answer-classifier`, у входа в каждую эпоху ворота: NPC задаёт вопрос, экипаж отвечает в чат, NPC всем отвечает да/нет и на верный ответ открывает ворота. Подробности — [answer-classifier/README.md](answer-classifier/README.md).
+
 ## Что уже есть
 
 - Лобби: имя → токен (`POST /auth/login`, хранится в localStorage), создание комнаты через RoomManager (`POST /room`) с тоглом публичности, вход по коду или из списка открытых комнат, ссылка-приглашение `/?room=CODE`.

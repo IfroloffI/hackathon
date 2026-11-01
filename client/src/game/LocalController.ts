@@ -10,6 +10,7 @@ import {
   respawnPoint,
   windAt,
   withCrates,
+  withGate,
   type Anim,
   type CratePos,
   type Level,
@@ -42,6 +43,8 @@ export class LocalController {
   enabled = true;
   /** Ящики уровня — позиции с сервера; для физики это твёрдые платформы. */
   crates: readonly CratePos[] = [];
+  /** Ворота у входа в эпоху открыты (с сервера). Закрытые — твёрдая стена. */
+  gateOpen = true;
   /** В какой ящик сейчас упираемся (Game шлёт серверу «толкаю»). */
   pushing: { crateId: string; dir: 1 | -1 } | null = null;
 
@@ -65,15 +68,15 @@ export class LocalController {
   teleport(p: { x: number; y: number; z: number }) {
     ({ x: this.x, y: this.y, z: this.z } = p);
     this.vx = this.vy = this.vz = 0;
-    resolvePenetration(this, withCrates(this.level, this.crates));
+    resolvePenetration(this, this.solid());
   }
 
   update(dt: number, now = mechClock()) {
     const k = this.enabled ? this.keys : new Set<string>();
     const dir = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     const depth = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
-    // Ящики — такие же твёрдые объекты, как платформы; ветер и стрелы ими тоже гасятся.
-    const solid = withCrates(this.level, this.crates);
+    // Ящики и закрытые ворота — такие же твёрдые объекты, как платформы; ветер и стрелы ими тоже гасятся.
+    const solid = this.solid();
 
     const wind = windAt(solid, this, now);
     this.vx = Math.max(-MAX_WIND_VX, Math.min(MAX_WIND_VX, dir * PHYSICS.runSpeed + wind));
@@ -99,6 +102,10 @@ export class LocalController {
     }
 
     this.anim = !this.grounded ? (this.vy > 0 ? 'jump' : 'fall') : dir !== 0 ? 'run' : 'idle';
+  }
+
+  private solid() {
+    return withCrates(withGate(this.level, this.gateOpen), this.crates);
   }
 
   /** Что вернуло к чекпоинту (один раз): стрела или ров — для реакции персонажа. */

@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { EPOCHS, mechClock, type CratePos, type Level } from '@chronolet/shared';
+import { EPOCHS, GATE_SIZE, mechClock, type CratePos, type Level } from '@chronolet/shared';
 import { Character } from '../Character.ts';
 import { disposeTree, levelDepth, platformMesh, stationMarker } from './common.ts';
 import { vkCoin, type CoinView } from './vkCoin.ts';
 import type { Decor } from './decor.ts';
 import { buildObstacles } from './obstacles.ts';
+import { gate as gateProp } from './props.ts';
 import { decorateHub } from './hub.ts';
 import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua, decorateWoolsthorpe } from './epochs.ts';
 
@@ -18,6 +19,8 @@ export interface World {
   popCoin(id: string): void;
   /** Позиции ящиков с сервера. */
   setCrates(list: readonly CratePos[]): void;
+  /** Ворота у входа открыты (с сервера) — анимация открытия. */
+  setGateOpen(open: boolean): void;
   /** Где свой игрок — для флажков чекпоинтов. */
   setProgress(x: number): void;
   dispose(): void;
@@ -76,6 +79,12 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     npcs.push(npc);
   }
 
+  const gate = level.gate ? gateProp(GATE_SIZE.w, GATE_SIZE.h, depth) : null;
+  if (gate && level.gate) {
+    gate.root.position.set(level.gate.x, 0, 0);
+    g.add(gate.root);
+  }
+
   const decor = (THEMES[level.id] ?? decorateHub)(g, scene);
   const obstacles = buildObstacles(g, level);
 
@@ -92,6 +101,7 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
   return {
     update(t, dt, focusX = 0) {
       decor.update?.(t);
+      gate?.update(dt);
       obstacles.update(t, mechClock(), dt);
       // Солнце (и его тени) едет за камерой с шагом, чтобы тени не «дрожали».
       const fx = Math.round(focusX / 4) * 4;
@@ -117,6 +127,9 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     },
     setCrates(list) {
       obstacles.setCrates(list);
+    },
+    setGateOpen(open) {
+      gate?.setOpen(open);
     },
     setProgress(x) {
       obstacles.setProgress(x);

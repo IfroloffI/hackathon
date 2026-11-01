@@ -2,6 +2,8 @@ import { scenarioForLevel, type ScenarioBonus, type ScenarioDef, type ScenarioSt
 
 /** Факты об эпохе, по которым проверяются условия шагов. Их сообщает комната. */
 export interface ScenarioFacts {
+  /** Ворота у входа открыты (или их на уровне нет). */
+  gateOpen: boolean;
   rolesFilled: boolean;
   stagesPassed: number;
   solved: boolean;
@@ -71,6 +73,8 @@ export class ScenarioRuntime {
 
   private satisfied(c: StepCondition, f: ScenarioFacts): boolean {
     switch (c.kind) {
+      case 'gate':
+        return f.gateOpen;
       case 'talked':
         return this.talked.has(c.agent);
       case 'roles':

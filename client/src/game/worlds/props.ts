@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { craft, glowing, mesh, soft, stitchRing, stripeTexture } from '../craft.ts';
+import { badgeTexture, craft, glowing, mesh, soft, stitchRing, stripeTexture } from '../craft.ts';
 
 /**
  * Интерактивные объекты полосы препятствий (заготовка: пока только вид, механику подключим позже).
@@ -19,6 +19,8 @@ export const AFFORDANCE = {
   wind: 0x37c8ff,
   /** Лазать / раскачиваться (верёвки). */
   climb: 0xf2d16b,
+  /** Ответить NPC (ворота с вопросом). */
+  answer: 0xb388ff,
 } as const;
 
 export type PropKind = 'crate' | 'rope' | 'trampoline' | 'fan' | 'arrows' | 'moat';
@@ -279,4 +281,69 @@ export function buildProp(kind: PropKind, w: number, h: number, d: number, color
     case 'moat':
       return moat(w, d, color, color === 0xff7a2a);
   }
+}
+
+export interface GateView {
+  root: THREE.Group;
+  setOpen(open: boolean): void;
+  update(dt: number): void;
+}
+
+/**
+ * Ворота у входа в эпоху: два столба, перекладина и створка-решётка на всю глубину дорожки.
+ * Закрыты — фиолетовый кант «ответь NPC» и табличка; открываются, сворачиваясь вверх к перекладине.
+ * (x, 0) — низ створки по центру; w×h — габарит коллизии створки (shared GATE_SIZE).
+ */
+export function gate(w: number, h: number, depth: number, wood = 0x8a5a2b): GateView {
+  const root = new THREE.Group();
+  const post = craft('card', 0x5e3b1c);
+  for (const z of [-depth / 2 - 0.2, depth / 2 + 0.2]) {
+    root.add(mesh(soft(w + 0.3, h + 0.6, 0.4, 0.1), post, 0, (h + 0.6) / 2, z));
+  }
+  root.add(mesh(soft(w + 0.5, 0.5, depth + 1.2, 0.12), post, 0, h + 0.55));
+
+  // Створка подвешена за верх: scale.y сворачивает её к перекладине.
+  const door = new THREE.Group();
+  door.position.y = h;
+  const bar = craft('card', wood);
+  const bars = Math.max(3, Math.round(depth / 0.5));
+  for (let i = 0; i < bars; i++) {
+    const z = -depth / 2 + (i + 0.5) * (depth / bars);
+    door.add(mesh(soft(w * 0.5, h, 0.22, 0.06), bar, 0, -h / 2, z));
+  }
+  const strap = craft('felt', 0xd9b77e);
+  for (const y of [0.25, 0.55, 0.85]) door.add(mesh(soft(w * 0.7, 0.18, depth, 0.05), strap, 0, -h * y));
+  door.add(rim(AFFORDANCE.answer, w * 1.4, depth * 1.02, -h + 0.04));
+  root.add(door);
+
+  // Табличка над воротами — к камере.
+  const signMat = new THREE.MeshStandardMaterial({ map: badgeTexture('? Ответь в чат', '#7c4dff'), transparent: true, roughness: 0.9 });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), signMat);
+  sign.position.set(0, h + 1.35, depth / 2 + 0.7);
+  root.add(sign);
+
+  let open = false;
+  let known = false; // первое состояние с сервера — без анимации (перезаход в открытую эпоху)
+  let k = 1; // 1 — закрыто, 0 — свёрнуто
+  return {
+    root,
+    setOpen(v) {
+      if (!known) {
+        known = true;
+        k = v ? 0.04 : 1;
+        door.scale.y = k;
+      }
+      if (v === open) return;
+      open = v;
+      signMat.map?.dispose();
+      signMat.map = badgeTexture(v ? 'Открыто' : '? Ответь в чат', v ? '#2bb673' : '#7c4dff');
+      signMat.needsUpdate = true;
+    },
+    update(dt) {
+      const target = open ? 0.04 : 1;
+      if (k === target) return;
+      k = open ? Math.max(target, k - dt * 1.4) : Math.min(target, k + dt * 3);
+      door.scale.y = k;
+    },
+  };
 }
