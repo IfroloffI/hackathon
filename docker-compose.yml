@@ -54,5 +54,68 @@ services:
       - 'host.docker.internal:host-gateway'
     restart: unless-stopped
 
+  # ---------- Расшифровка голосового чата (transcriber/README.md) ----------
+  # LiveKit работает на хосте (npm run livekit), эти три сервиса — в Docker.
+  #   macOS (Docker Desktop):  docker compose up -d transcriber
+  #   Linux:                   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d transcriber
+  # Whisper и Redis наружу открыты только на 127.0.0.1 хоста (для отладки: :8770 и :6380).
+
+  whisper:
+    build: ./transcriber/whisper
+    ports:
+      - '127.0.0.1:8770:8000'
+    volumes:
+      - whisper-models:/models
+    environment:
+      # small — компромисс скорость/качество на CPU (замеры — transcriber/README.md).
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:%s/health" % os.environ.get("PORT", "8000"))']
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 10s
+    restart: unless-stopped
+
+  # Хранилище расшифровок: вся история, AOF на диск. 6380 — на хосте 6379 бывает занят своим Redis.
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    ports:
+      - '127.0.0.1:6380:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -p $${REDIS_PORT:-6379} ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  transcriber:
+    build: ./transcriber/agent
+    depends_on:
+      whisper:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # LiveKit на хосте слушает 127.0.0.1:17880; Docker Desktop пробрасывает
+      # host.docker.internal на loopback мака. Медиа агент шлёт на LAN-IP хоста.
+      LIVEKIT_URL: ${TRANSCRIBER_LIVEKIT_URL:-ws://host.docker.internal:17880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}
+      WHISPER_URL: http://whisper:8000
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+      REDIS_URL: redis://redis:6379/0
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
 volumes:
   ollama:
+  whisper-models:
+  redis-data:

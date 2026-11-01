@@ -1,0 +1,28 @@
+# Linux-хост: расшифровка в host network.
+#   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d transcriber
+#
+# Зачем: на Linux LiveKit (127.0.0.1:17880) из docker-моста не виден, а трафик хост → мост
+# ломают VPN-туннели (TUN с fwmark-правилами). В host network все три сервиса слушают
+# только 127.0.0.1 хоста — те же порты, что и в основном файле (:8770, :6380).
+services:
+  whisper:
+    network_mode: host
+    ports: !reset []
+    command: ['uvicorn', 'server:app', '--host', '127.0.0.1', '--port', '8770']
+    environment:
+      PORT: '8770'
+
+  redis:
+    network_mode: host
+    ports: !reset []
+    command: ['redis-server', '--bind', '127.0.0.1', '--port', '6380', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    environment:
+      REDIS_PORT: '6380'
+
+  transcriber:
+    network_mode: host
+    extra_hosts: !reset []
+    environment:
+      LIVEKIT_URL: ${TRANSCRIBER_LIVEKIT_URL:-ws://127.0.0.1:17880}
+      WHISPER_URL: http://127.0.0.1:8770
+      REDIS_URL: redis://127.0.0.1:6380/0

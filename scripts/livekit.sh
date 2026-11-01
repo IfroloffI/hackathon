@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Скачивает (один раз) и запускает LiveKit-сервер для голосового чата.
-# Linux: без Docker, бинарник в .cache/livekit. macOS/Docker: см. livekit/docker-compose.yml.
+# Linux: без Docker, бинарник в .cache/livekit. macOS: brew install livekit (сборок под mac
+# в релизах GitHub нет; Docker на маке не пропускает UDP-медиа из LAN в контейнер).
 set -euo pipefail
 
 VERSION="${LIVEKIT_VERSION:-v1.13.11}"
@@ -10,10 +11,7 @@ BIN="$CACHE/livekit-server"
 
 case "$(uname -s)" in
   Linux) OS=linux ;;
-  Darwin)
-    echo "[livekit] Для macOS проще Docker: cd livekit && docker compose up livekit" >&2
-    exit 1
-    ;;
+  Darwin) OS=darwin ;;
   *)
     echo "[livekit] Неподдерживаемая ОС: $(uname -s)" >&2
     exit 1
@@ -30,7 +28,13 @@ case "$(uname -m)" in
     ;;
 esac
 
-if [[ ! -x "$BIN" ]]; then
+if [[ "$OS" == darwin ]]; then
+  BIN="$(command -v livekit-server || true)"
+  if [[ -z "$BIN" ]]; then
+    echo "[livekit] Нет livekit-server. Установи: brew install livekit" >&2
+    exit 1
+  fi
+elif [[ ! -x "$BIN" ]]; then
   echo "[livekit] Скачиваю LiveKit $VERSION ($OS/$ARCH)…"
   mkdir -p "$CACHE"
   TMP="$(mktemp -d)"
@@ -44,6 +48,15 @@ fi
 # Адрес, который LiveKit объявит браузерам в ICE-кандидатах.
 # Сначала Wi-Fi/Ethernet, затем прочие, VPN/Docker-интерфейсы — в конце.
 detect_ip() {
+  if [[ "$OS" == darwin ]]; then
+    # Интерфейс маршрута по умолчанию (Wi-Fi/Ethernet), затем en0/en1.
+    local ifc
+    ifc="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+    for i in $ifc en0 en1; do
+      ipconfig getifaddr "$i" 2>/dev/null && return 0
+    done
+    return 0
+  fi
   if command -v ip >/dev/null 2>&1; then
     ip -4 -o addr show scope global 2>/dev/null \
       | awk '{
@@ -63,7 +76,13 @@ NODE_IP="${LIVEKIT_NODE_IP:-$(detect_ip)}"
 [[ -z "$NODE_IP" ]] && NODE_IP=127.0.0.1
 
 # LiveKit вешает 7881 (RTC TCP), TLS-прокси — 7880. Если занято — кто-то уже запущен.
-port_busy() { ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"; }
+port_busy() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"
+  else
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+  fi
+}
 if port_busy 7881 || port_busy 7880; then
   echo "[livekit] Порт(ы) 7880/7881 уже занят — LiveKit, похоже, уже запущен." >&2
   echo "[livekit] Перед перезапуском останови старые процессы:" >&2

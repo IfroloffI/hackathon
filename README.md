@@ -50,6 +50,8 @@ npm run udp-listen -w server      # слушатель UDP-маяков публ
 
 В `npm run dev` включён `CHRONOLET_SOLO=1`: один игрок может занять обе роли — удобно тестировать в одиночку. В `npm start` (хакатон) головоломки строго на двоих.
 
+**Расшифровка голосового чата** (LiveKit-агент → Whisper → Redis, вся история по id комнаты): `docker compose up -d transcriber` при запущенном `npm run livekit` (macOS; на Linux — с `-f docker-compose.linux.yml`), подробности в [transcriber/README.md](transcriber/README.md). На macOS LiveKit ставится через `brew install livekit`.
+
 ## Что уже есть
 
 - Лобби: имя → токен (`POST /auth/login`, хранится в localStorage), создание комнаты через RoomManager (`POST /room`) с тоглом публичности, вход по коду или из списка открытых комнат, ссылка-приглашение `/?room=CODE`.
