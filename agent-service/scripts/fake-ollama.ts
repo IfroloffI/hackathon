@@ -9,7 +9,7 @@ import http from 'node:http';
 const PORT = Number(process.env.PORT ?? 11435);
 const TTFT = Number(process.env.FAKE_TTFT_MS ?? 800);
 const TPS = Number(process.env.FAKE_TPS ?? 8);
-const MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:3b';
+const MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
 
 function reply(task: string): string {
   const quoted = /«([^»]+)»\.?\s*$/.exec(task)?.[1];

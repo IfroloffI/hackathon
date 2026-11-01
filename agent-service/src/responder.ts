@@ -1,7 +1,7 @@
-import { ASK_TIMEOUT_MS, EPOCHS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
+import { ASK_TIMEOUT_MS, EPOCHS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, getLevel, guideStepFor, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
 import { config } from './config.ts';
 import { api } from './api.ts';
-import { allSessions, ctx, saidBy, situation, speechLines, type SessionContext } from './context.ts';
+import { allSessions, ctx, forget, markAnswered, saidBy, situation, speechLines, tooSimilar, type SessionContext } from './context.ts';
 import { buildMessages, cleanReply, keepsNumbers } from './prompt.ts';
 import { health, streamChat } from './ollama.ts';
 import { TaskQueue } from './queue.ts';
@@ -30,13 +30,33 @@ export function onEvent(e: GameEvent, agents: Agents) {
   const d = e.data as Partial<ReplyableData> & { text?: string; attempts?: number; message?: string | null; part?: string | null; seconds?: number };
   const c = ctx(e.session);
 
+
   if (e.type === 'agent.ask' && d.replyable) {
     const agent = agents.get(d.agentId!);
     if (!agent) return;
-    const task = d.text
-      ? `Игрок ${e.player?.name} спрашивает тебя: «${d.text}». Ответь ему по существу, не выходя из роли.`
-      : `Игрок ${e.player?.name} подошёл поговорить. Коротко скажи, что экипажу нужно сделать сейчас, исходя из цели шага.`;
-    return enqueue(e, 0, ASK_TIMEOUT_MS, { agent, task, to: e.player?.id, withMemory: true, rememberAs: d.text ? `спрашивал: «${d.text.slice(0, 60)}»` : 'подходил поговорить' });
+    if (d.text) {
+      return enqueue(e, 0, ASK_TIMEOUT_MS, {
+        agent,
+        task: `Игрок ${e.player?.name} спрашивает тебя: «${d.text}». Ответь ему по существу, не выходя из роли.`,
+        to: e.player?.id,
+        withMemory: true,
+        rememberAs: `спрашивал: «${d.text.slice(0, 60)}»`,
+      });
+    }
+    // E у NPC — продолжение голосового разговора: отвечаем всему экипажу на свежие фразы вслух.
+    const speech = speechLines(c, Date.now(), 4 * 60_000, c.answeredUpTo);
+    markAnswered(c);
+    const said = saidBy(c, agent.id);
+    return enqueue(e, 0, ASK_TIMEOUT_MS, {
+      agent,
+      speech,
+      task: speech.length
+        ? `${e.player?.name} подошёл к тебе. Ответь на то, что экипаж только что говорил вслух (расшифровка выше), как в живом разговоре.`
+        : `${e.player?.name} подошёл к тебе, но экипаж пока молчал. Поприветствуй в своём характере и спроси, о чём хотят поговорить.`,
+      withMemory: true,
+      rememberAs: 'подходил поговорить',
+      guard: (t) => !tooSimilar(t, said),
+    });
   }
 
   if (d.replyable && (e.type === 'puzzle.failed' || e.type === 'puzzle.stage' || e.type === 'puzzle.solved')) {
@@ -62,62 +82,91 @@ export function onEvent(e: GameEvent, agents: Agents) {
     return enqueue(e, e.type === 'puzzle.failed' ? 1 : 2, REACT_TIMEOUT_MS, { agent, task, mistake: e.type === 'puzzle.failed' ? (d.message ?? undefined) : undefined });
   }
 
-  if (e.type === 'idle') {
-    // Инициативная реплика: заготовки на простой нет, поэтому двойного голоса быть не может.
-    const agent = agents.get('ship_ai');
-    const now = Date.now();
-    if (!agent || now - c.lastProactiveAt < config.proactiveGapMs || now - c.lastShipSpeechAt < config.proactiveGapMs) return;
-    c.lastProactiveAt = now;
-    return enqueue(e, 3, 8000, { agent, task: `${e.player?.name} стоит без дела уже ${d.seconds} секунд. Подколи его одной фразой и напомни цель.` });
-  }
+  // Простой (idle) больше не повод для реплик ХРОНОСа: он говорит редко — подсказки по трассе (maybeShipHint).
 }
 
+/** Снимок старше этого — сессия не идёт (комнату закрыли): не говорим в пустоту и забываем её. */
+const STALE_MS = 15_000;
+const FORGET_MS = 5 * 60_000;
+
+/** Живые сессии с игроками; закрытые давно — забываем (иначе реплики уходят в пустоту и грузят модель). */
+function liveSessions(now: number): [string, SessionContext][] {
+  const live: [string, SessionContext][] = [];
+  for (const [session, c] of allSessions()) {
+    if (now - c.snapshotAt > FORGET_MS) forget(session);
+    else if (c.snapshot && now - c.snapshotAt <= STALE_MS && c.snapshot.crew.some((m) => m.connected)) live.push([session, c]);
+  }
+  return live;
+}
+
+const pseudoEvent = (session: string, c: SessionContext, type: string, now: number) =>
+  ({ seq: 0, ts: now, session, type, level: c.snapshot?.levelId ?? '', scenario: null, step: null, player: null, data: {} }) as unknown as GameEvent;
+
 /**
- * Инициативный комментарий к разговору экипажа: раз в COMMENT_GAP_MS, если вслух сказали хоть что-то
- * новое (расшифровки из Redis) и NPC не говорили только что. В эпохе обычно говорит её рассказчик,
- * иногда — ХРОНОС; на борту — ХРОНОС. Реплика уходит всем: субтитр + строка в чате.
+ * Разговор голосом: на новые фразы из расшифровки (Redis) отвечает местный NPC — рассказчик эпохи,
+ * на борту — ХРОНОС. Не чаще раза в COMMENT_GAP_MS и не перебивая только что прозвучавшую реплику.
+ * Без новых фраз NPC молчит: реплики «ни о чём» и были тем, что «не имеет отношения к разговору».
  */
 export function maybeComment(agents: Agents, now = Date.now()) {
   if (!health.ok) return;
-  for (const [session, c] of allSessions()) {
-    if (!c.snapshot || c.speechSinceComment < config.commentMinPhrases) continue;
+  for (const [session, c] of liveSessions(now)) {
+    if (c.speechSinceComment < Math.max(1, config.commentMinPhrases)) continue;
     if (now - c.lastCommentAt < config.commentGapMs || now - c.lastAnySpeechAt < config.commentQuietMs) continue;
-    const agent = commentator(c, agents);
+    const narrator = EPOCHS.find((ep) => ep.levelId === c.snapshot?.levelId)?.narrator.id;
+    const agent = agents.get(narrator ?? 'ship_ai');
     if (!agent) continue;
     c.lastCommentAt = now;
-    c.speechSinceComment = 0;
-    c.comments++;
-    const e = {
-      seq: 0,
-      ts: now,
-      session,
-      type: 'transcript.comment',
-      level: c.snapshot.levelId,
-      scenario: null,
-      step: null,
-      player: null,
-      data: {},
-    } as unknown as GameEvent;
-    enqueue(e, 3, 15000, {
+    const speech = speechLines(c, now, 4 * 60_000, c.answeredUpTo);
+    markAnswered(c);
+    const said = saidBy(c, agent.id);
+    enqueue(pseudoEvent(session, c, 'transcript.comment', now), 3, 9000, {
       agent,
       task:
-        'Ты слышишь, о чём экипаж только что говорил вслух (расшифровка выше), и видишь, что он делает. ' +
-        'Встрянь одной-двумя фразами в своём характере: отреагируй на конкретные слова игроков — ' +
-        'подскажи, куда смотреть по цели шага, поправь заблуждение или просто пошути. Ответ головоломки не называй.',
+        'Экипаж только что говорил вслух (последние фразы расшифровки выше) — это разговор и с тобой. Ответь на конкретные слова, ' +
+        'как в живом диалоге, в своём характере: на вопрос — ответь, на ошибку — поправь, можно пошутить. Ответ головоломки не называй.',
+      // Инициативную реплику никто не ждёт с таймером — можно дольше ждать первого слова.
+      firstTokenMs: 9000,
+      speech,
+      // Повтор прошлой реплики — переспросим или промолчим (уйдёт целиком, без потоковых кусков).
+      guard: (t) => !tooSimilar(t, said),
     });
   }
 }
 
-/** Кто комментирует: рассказчик эпохи (2 раза из 3) или ХРОНОС; на борту — ХРОНОС. */
-function commentator(c: SessionContext, agents: Agents): AgentProfile | undefined {
-  const narrator = EPOCHS.find((ep) => ep.levelId === c.snapshot?.levelId)?.narrator.id;
-  const id = narrator && c.comments % 3 !== 2 ? narrator : 'ship_ai';
-  return agents.get(id) ?? agents.get('ship_ai');
+/**
+ * Подсказки по прохождению — дело ХРОНОСа, и редко: раз в SHIP_HINT_GAP_MS, только в эпохе и только если
+ * экипаж продвинулся к новому участку трассы (или долго топчется на старом). Текст — из описания уровня, без LLM:
+ * короткий и точный.
+ */
+export function maybeShipHint(now = Date.now()) {
+  for (const [session, c] of liveSessions(now)) {
+    const s = c.snapshot!;
+    if (!EPOCHS.some((ep) => ep.levelId === s.levelId) || now - c.lastShipSpeechAt < config.shipHintGapMs) continue;
+    if (now - c.lastAnySpeechAt < config.commentQuietMs) continue;
+    const lead = s.crew.filter((m) => m.connected).reduce((a, b) => (b.x > a.x ? b : a));
+    const step = guideStepFor(getLevel(s.levelId), lead.x);
+    if (!step || (step === c.lastHint && now - c.lastHintAt < 3 * config.shipHintGapMs)) continue;
+    c.lastHint = step;
+    c.lastHintAt = now;
+    c.lastShipSpeechAt = now;
+    void api.say({ session, agentId: 'ship_ai', text: `💡 ${step}` }).catch(() => {});
+    console.log(`[agent] ${session} ship_ai подсказка по трассе: «${step.slice(0, 80)}»`);
+  }
 }
 
 interface SpeakPlan {
   agent: AgentProfile;
   task: string;
+  /** Дополнительные строки «Ситуации» (прогресс по трассе). */
+  extra?: string[];
+  /** Потолок длины ответа в токенах (по умолчанию — MAX_TOKENS). */
+  maxTokens?: number;
+  /** Сколько ждать первого токена (по умолчанию — FIRST_TOKEN_MS). */
+  firstTokenMs?: number;
+  /** Свои строки расшифровки (комментарий — только неотвеченные); по умолчанию — все свежие. */
+  speech?: string[];
+  /** Уже переспрашивали после повтора — второй раз не пробуем. */
+  retried?: boolean;
   to?: string;
   hintLevel?: 1 | 2 | 3;
   guard?: (text: string) => boolean;
@@ -177,17 +226,17 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
   const c = ctx(e.session);
   const messages = buildMessages({
     agent: withBehavior(plan.agent, c.snapshot?.agents?.[plan.agent.id]?.behavior),
-    situation: situation(c.snapshot),
+    situation: [...situation(c.snapshot), ...(plan.extra ?? [])],
     recent: c.recent,
     memory,
-    speech: speechLines(c),
+    speech: plan.speech ?? speechLines(c),
     said: saidBy(c, plan.agent.id),
     task: plan.task,
   });
 
   const ac = new AbortController();
   let reason: 'first-token' | 'deadline' | null = null;
-  const firstTokenTimer = setTimeout(() => ((reason = 'first-token'), ac.abort()), config.firstTokenMs);
+  const firstTokenTimer = setTimeout(() => ((reason = 'first-token'), ac.abort()), plan.firstTokenMs ?? config.firstTokenMs);
   const deadline = setTimeout(() => ((reason = 'deadline'), ac.abort()), STREAM_DEADLINE_MS - 1500);
   let lastFlush = 0;
   let flushed = '';
@@ -196,6 +245,7 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
   try {
     const res = await streamChat(messages, {
       signal: ac.signal,
+      maxTokens: plan.maxTokens,
       onToken: (raw) => {
         clearTimeout(firstTokenTimer);
         const now = Date.now();
@@ -213,11 +263,17 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
     health.markOk();
     const text = cleanReply(res.text, plan.agent);
     if (!text || (plan.guard && !plan.guard(text))) {
+      // Инициативная реплика вышла повтором — одна попытка с явным «эта тема уже была».
+      if (!replyable && text && !plan.retried) {
+        log(e, plan, 'fallback', { ms: Date.now() - t0, ttft: res.ttftMs, tokens: res.tokens, note: `повтор, переспрашиваю: «${text.slice(0, 60)}»` });
+        return speak(e, { ...plan, retried: true, task: `${plan.task} Ты только что чуть не сказал: «${text.slice(0, 120)}» — это уже звучало. Скажи о другом.` }, false);
+      }
       if (replyable) await send('', true); // отказ → заготовка сразу
       return log(e, plan, 'fallback', { ms: Date.now() - t0, ttft: res.ttftMs, tokens: res.tokens, note: text ? `гард: «${text.slice(0, 60)}»` : 'пустой ответ' });
     }
     const ack = await send(text, true);
     if (ack.status === 409) return log(e, plan, 'timeout', { ms: Date.now() - t0, note: 'опоздали к финалу' });
+    if (ack.status !== 200) return log(e, plan, 'fallback', { ms: Date.now() - t0, note: `сервер не принял: HTTP ${ack.status}` });
     log(e, plan, 'llm', { ms: Date.now() - t0, ttft: res.ttftMs, tokens: res.tokens, text });
     await rememberAfter(e, plan, text);
   } catch (err) {
@@ -251,7 +307,7 @@ async function rememberAfter(e: GameEvent, plan: SpeakPlan, said: string) {
 
 function log(e: GameEvent, plan: SpeakPlan, source: 'llm' | 'fallback' | 'timeout', info: { ms?: number; ttft?: number | null; tokens?: number; text?: string; note?: string }) {
   const parts = [
-    `[agent] #${e.seq} ${e.type} ${plan.agent.id}${plan.hintLevel ? ` hint=${plan.hintLevel}` : ''}`,
+    `[agent] ${e.session} #${e.seq} ${e.type} ${plan.agent.id}${plan.hintLevel ? ` hint=${plan.hintLevel}` : ''}`,
     `source=${source}`,
     info.ttft != null ? `ttft=${info.ttft}ms` : '',
     info.ms != null ? `total=${info.ms}ms` : '',

@@ -5,6 +5,7 @@ import type {
   LlmMemory,
   LlmMemoryRequest,
   LlmSayRequest,
+  LlmVoiceRequest,
 } from '@chronolet/shared';
 import { config } from './config.ts';
 
@@ -19,6 +20,8 @@ async function post<T>(path: string, body: unknown): Promise<{ status: number; b
 export const api = {
   say: (req: LlmSayRequest) => post<LlmAck>('/llm/say', req),
   hint: (req: LlmHintRequest) => post<LlmAck>('/llm/hint', req),
+  /** Фраза из расшифровки — серверу: пока ворота закрыты, она идёт классификатору ответов. */
+  voice: (req: LlmVoiceRequest) => post<LlmAck>('/llm/voice', req),
   memory: (req: LlmMemoryRequest) => post<{ ok: boolean }>('/llm/memory', req),
   async getMemory(agentId: string, playerId: string): Promise<LlmMemory | null> {
     try {

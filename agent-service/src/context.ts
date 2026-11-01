@@ -18,12 +18,21 @@ export interface SessionContext {
   speech: Phrase[];
   /** Новых фраз с прошлого комментария NPC. */
   speechSinceComment: number;
+  /** До какого момента фразы уже «отвечены» комментарием — второй раз на них не реагируем. */
+  answeredUpTo: number;
   lastCommentAt: number;
   /** Когда любой NPC говорил последний раз — комментарии не перебивают. */
   lastAnySpeechAt: number;
   /** Собственные последние реплики каждого агента — чтобы не повторяться. */
   said: Map<string, string[]>;
   comments: number;
+  /** Когда пришёл последний снимок: давно не было — комната закрыта. */
+  snapshotAt: number;
+  /** Последняя подсказка ХРОНОСа по трассе — не повторять её без прогресса. */
+  lastHint: string;
+  lastHintAt: number;
+  /** Ворота эпохи уже открыты — вопрос у ворот больше не тема для разговора. */
+  gateOpen: boolean;
 }
 
 const RECENT = 8;
@@ -34,7 +43,7 @@ const sessions = new Map<string, SessionContext>();
 export function ctx(session: string): SessionContext {
   let c = sessions.get(session);
   if (!c) {
-    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0 };
+    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, answeredUpTo: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0, snapshotAt: Date.now(), lastHint: '', lastHintAt: 0, gateOpen: false };
     sessions.set(session, c);
   }
   return c;
@@ -54,9 +63,32 @@ export function hearPhrase(session: string, p: Phrase, seed = false) {
   if (!seed) c.speechSinceComment++;
 }
 
-/** Последние фразы экипажа вслух (свежее — за последние минуты) для промпта. */
-export function speechLines(c: SessionContext, now = Date.now(), maxAgeMs = 4 * 60_000): string[] {
-  return c.speech.filter((p) => now - p.at <= maxAgeMs).slice(-8).map((p) => `${p.name}: «${p.text.slice(0, 160)}»`);
+/** Последние фразы экипажа вслух (свежее — за последние минуты) для промпта. after — только новее этого момента. */
+export function speechLines(c: SessionContext, now = Date.now(), maxAgeMs = 4 * 60_000, after = 0): string[] {
+  return c.speech.filter((p) => now - p.at <= maxAgeMs && p.at > after).slice(-8).map((p) => `${p.name}: «${p.text.slice(0, 160)}»`);
+}
+
+/** Пометить всё услышанное как отвеченное (комментарий NPC на это уже прозвучал). */
+export function markAnswered(c: SessionContext) {
+  c.answeredUpTo = c.speech.at(-1)?.at ?? c.answeredUpTo;
+  c.speechSinceComment = 0;
+}
+
+const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2));
+
+/**
+ * Похожа ли реплика на одну из прошлых (Жаккар по словам) — тогда лучше переспросить модель или промолчать.
+ * Общие имена и пара слов («admiok», «Механик») повтором не считаются — нужен почти тот же текст.
+ */
+export function tooSimilar(text: string, previous: string[], threshold = 0.5): boolean {
+  const a = words(text);
+  if (!a.size) return false;
+  return previous.some((p) => {
+    const b = words(p);
+    let common = 0;
+    for (const w of a) if (b.has(w)) common++;
+    return common / (a.size + b.size - common) >= threshold;
+  });
 }
 
 /** Свои последние реплики агента. */
@@ -76,6 +108,7 @@ export function describe(e: GameEvent): string | null {
     case 'chat':
       return `${who} в чате: «${String(d.text).slice(0, 120)}»`;
     case 'agent.ask':
+      if (d.guide) return `${who} попросил подсказку, как пройти дальше (подсказка уже прозвучала)`;
       return d.text ? `${who} спросил агента: «${String(d.text).slice(0, 120)}»` : `${who} подошёл поговорить`;
     case 'agent.say':
       return `${String(d.agentId) === 'ship_ai' ? 'ХРОНОС' : 'рассказчик'} сказал: «${String(d.text).slice(0, 140)}»`;
@@ -115,6 +148,16 @@ export function remember(e: GameEvent) {
     }
   }
   if (e.type === 'session.end') return forget(e.session);
+  if (e.type === 'level.enter') c.gateOpen = false;
+  if (e.type === 'gate.open') {
+    // Вопрос ворот отвечен: ни свои реплики с вопросом, ни строки о нём в ленте больше не подсказываем модели.
+    c.gateOpen = true;
+    // Фразы, которыми отвечали воротам, — не тема для разговора.
+    markAnswered(c);
+    const agentId = (e.data as { agentId?: string }).agentId;
+    if (agentId) c.said.delete(agentId);
+    c.recent = c.recent.filter((l) => !l.startsWith('рассказчик сказал'));
+  }
   const line = describe(e);
   if (!line) return;
   c.recent.push(line);
@@ -131,6 +174,7 @@ export function situation(s: SessionSnapshot | null, now = Date.now()): string[]
     const sec = Math.round((now - s.scenario.stepStartedAt) / 1000);
     lines.push(`Шаг «${s.scenario.stepTitle}», цель: ${s.scenario.goal}. Идёт ${sec} с${s.scenario.parSeconds ? ` (контроль ${s.scenario.parSeconds} с)` : ''}.`);
   }
+  if (sessions.get(s.session)?.gateOpen) lines.push('Ворота эпохи уже открыты: вопрос у ворот больше не задавай и не упоминай.');
   if (s.puzzle) lines.push(`Головоломка «${s.puzzle.title}»: ${s.puzzle.stage}. Ошибок: ${s.puzzle.attempts}, подсказок: ${s.puzzle.hintsGiven}.`);
   const crew = s.crew
     .filter((m) => m.connected)

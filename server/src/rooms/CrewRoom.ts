@@ -50,6 +50,7 @@ import {
   type LlmAck,
   type LlmHintRequest,
   type LlmSayRequest,
+  type LlmVoiceRequest,
   type PushPayload,
   type PuzzleActionPayload,
   type PuzzleViewMessage,
@@ -165,6 +166,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   /** Ящики уровня (точная физика) и кто их сейчас толкает: id ящика → направление и срок. */
   private crates: CrateBody[] = [];
   private pushes = new Map<string, { dir: 1 | -1; until: number }>();
+  /** За какие роли уже начислен опыт: «playerId:levelId:role». */
+  private rolesRewarded = new Set<string>();
   /** Награды паркура: «playerId:stationId» — каждому игроку один раз за сессию. */
   private rewardsClaimed = new Set<string>();
   /** Панель администратора: метрики клиентов, настройки NPC/агентов, кто смотрит панель. */
@@ -233,6 +236,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       snapshot: () => this.snapshot(),
       say: (req) => this.llmSay(req),
       hint: (req) => this.llmHint(req),
+      voice: (req) => this.voiceAnswer(req),
     });
   }
 
@@ -507,6 +511,25 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     this.emit('gate.answer', client.sessionId, { agentId: gate.agent, text: answer, accepted: verdict.accepted, probability: verdict.probability });
     this.sayTo(null, gate.agent, verdict.accepted ? lines.accept : lines.reject, 'script');
     if (verdict.accepted) this.openGate(gate, client, `${client.userData?.name ?? 'Кто-то'} ответил верно — ворота открыты!`);
+  }
+
+  /**
+   * Ответ воротам голосом: фраза из расшифровки → классификатор. «Да» — ворота открываются, как от ответа в чат;
+   * «нет» молча пропускаем: в голосовом чате говорят много чего, на каждую фразу отказ звучал бы спамом.
+   */
+  private async voiceAnswer(req: LlmVoiceRequest): Promise<LlmAck> {
+    const gate = this.closedGate();
+    const text = typeof req?.text === 'string' ? req.text.trim().slice(0, 300) : '';
+    if (!gate || !text) return { ok: true };
+    const [npc, verdict] = await Promise.all([gateNpcs(), classifyAnswer(gate.agent, text)]);
+    if (this.disposing || this.closedGate() !== gate || !verdict) return { ok: true };
+    const name = typeof req.name === 'string' && req.name.trim() ? req.name.trim().slice(0, 40) : 'Кто-то';
+    this.emit('gate.answer', null, { agentId: gate.agent, text, accepted: verdict.accepted, probability: verdict.probability, voice: true, name });
+    if (!verdict.accepted) return { ok: true };
+    const lines = npc?.[gate.agent];
+    if (lines) this.sayTo(null, gate.agent, lines.accept, 'script');
+    this.openGate(gate, null, `${name} ответил голосом верно — ворота открыты!`);
+    return { ok: true };
   }
 
   private openGate(gate: GateDef, by: CrewClient | null, text: string) {
@@ -859,7 +882,12 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     pz[role] = sid;
     this.emit('role.take', sid, { role });
     const m = this.member(client);
-    if (m) this.progression.role(m, role);
+    // Опыт и значки — только за первое взятие этой роли в этой эпохе: «взял-сдал-взял» не фармит XP.
+    const key = `${client.userData!.playerId}:${this.level.id}:${role}`;
+    if (m && !this.rolesRewarded.has(key)) {
+      this.rolesRewarded.add(key);
+      this.progression.role(m, role);
+    }
     this.shipSay(SHIP_AI_EVENTS.roleTaken(client.userData!.name, ROLE_NAME[role]));
     if (pz[other] !== sid) client.send(ServerMsg.PuzzleView, { puzzleId: this.puzzle.id, role: null, view: null });
     this.sendViewsTo(client);
