@@ -274,7 +274,7 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
 
   const onGlobalKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') rating.hidden = true;
-    if (e.key === 'Enter' && document.activeElement !== chatInput) {
+    if (e.key === 'Enter' && !isTyping()) {
       e.preventDefault();
       chatInput.focus();
       return;

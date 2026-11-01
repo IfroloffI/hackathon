@@ -7,6 +7,7 @@
     "start": "NODE_ENV=production tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
     "smoke": "tsx scripts/smoke.ts",
+    "admin-smoke": "tsx scripts/admin-smoke.ts",
     "udp-listen": "tsx scripts/udp-listen.ts",
     "test": "tsx --test src/**/*.test.ts",
     "playthrough": "tsx scripts/playthrough.ts",

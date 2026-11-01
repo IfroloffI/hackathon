@@ -76,6 +76,8 @@ export type CrateState = SchemaType<typeof CrateState>;
 export const CrewState = schema(
   {
     crewName: t.string(),
+    /** Имя хоста комнаты — он же администратор (панель администратора). */
+    host: t.string(),
     /** Где сейчас экипаж: 'hub' или levelId эпохи. */
     levelId: t.string(),
     /** Индекс эпохи, которую экипаж проходит (= число установленных деталей). */

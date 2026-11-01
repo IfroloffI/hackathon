@@ -1,5 +1,10 @@
 import { Room, ServerError, matchMaker, type AuthContext, type Client } from 'colyseus';
 import {
+  AdminMsg,
+  AdminServerMsg,
+  type AdminCommand,
+  type AdminResult,
+  type AdminSettings,
   AGENT_PROFILES,
   ASK_TIMEOUT_MS,
   CRATE_PUSH_TTL_MS,
@@ -63,6 +68,7 @@ import {
 } from '@chronolet/shared';
 
 import { sanitizeMove } from './movement.ts';
+import { ClientMetrics, defaultAdminSettings, mergeAdminSettings, parseClientStats } from './admin.ts';
 import { ScenarioRuntime, type ScenarioFacts, type StepChange } from './scenario.ts';
 import { Progression, type Member } from './progression.ts';
 import { playerState, players, profiles, sessions, type PlayerStats } from '../db/repositories.ts';
@@ -161,6 +167,11 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   private pushes = new Map<string, { dir: 1 | -1; until: number }>();
   /** Награды паркура: «playerId:stationId» — каждому игроку один раз за сессию. */
   private rewardsClaimed = new Set<string>();
+  /** Панель администратора: метрики клиентов, настройки NPC/агентов, кто смотрит панель. */
+  private metrics = new ClientMetrics();
+  private adminSettings: AdminSettings = defaultAdminSettings();
+  private adminSubs = new Set<string>();
+  private createdAt = Date.now();
 
   /** Короткий код комнаты вместо случайного id — его диктуют соседу по столу. */
   private async generateCode(): Promise<string> {
@@ -177,6 +188,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const crewName = (options.crewName?.trim() || `Экипаж ${hostName}`).slice(0, 40);
 
     this.state.crewName = crewName;
+    this.state.host = hostName;
     this.state.levelId = this.level.id;
     this.state.epoch = 0;
     this.state.puzzle = new PuzzleState();
@@ -188,16 +200,28 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     this.emit('session.start', null, { crewName, host: hostName });
     this.syncScenario();
 
-    this.onMessage(ClientMsg.Move, (client: CrewClient, msg: unknown) => this.handleMove(client, msg));
-    this.onMessage(ClientMsg.Chat, (client: CrewClient, msg: unknown) => this.handleChat(client, msg));
-    this.onMessage(ClientMsg.Interact, (client: CrewClient, msg: unknown) => this.handleInteract(client, msg));
-    this.onMessage(ClientMsg.PuzzleAction, (client: CrewClient, msg: unknown) => this.handlePuzzleAction(client, msg));
-    this.onMessage(ClientMsg.ShopBuy, (client: CrewClient, msg: unknown) => this.handleShop(client, msg, 'buy'));
-    this.onMessage(ClientMsg.ShopEquip, (client: CrewClient, msg: unknown) => this.handleShop(client, msg, 'equip'));
-    this.onMessage(ClientMsg.Like, (client: CrewClient, msg: unknown) => this.handleLike(client, msg));
-    this.onMessage(ClientMsg.Emote, (client: CrewClient, msg: unknown) => this.handleEmote(client, msg));
-    this.onMessage(ClientMsg.Ask, (client: CrewClient, msg: unknown) => this.handleAsk(client, msg));
-    this.onMessage(ClientMsg.Push, (client: CrewClient, msg: unknown) => this.handlePush(client, msg));
+    this.onMsg(ClientMsg.Move, (client: CrewClient, msg: unknown) => this.handleMove(client, msg));
+    this.onMsg(ClientMsg.Chat, (client: CrewClient, msg: unknown) => this.handleChat(client, msg));
+    this.onMsg(ClientMsg.Interact, (client: CrewClient, msg: unknown) => this.handleInteract(client, msg));
+    this.onMsg(ClientMsg.PuzzleAction, (client: CrewClient, msg: unknown) => this.handlePuzzleAction(client, msg));
+    this.onMsg(ClientMsg.ShopBuy, (client: CrewClient, msg: unknown) => this.handleShop(client, msg, 'buy'));
+    this.onMsg(ClientMsg.ShopEquip, (client: CrewClient, msg: unknown) => this.handleShop(client, msg, 'equip'));
+    this.onMsg(ClientMsg.Like, (client: CrewClient, msg: unknown) => this.handleLike(client, msg));
+    this.onMsg(ClientMsg.Emote, (client: CrewClient, msg: unknown) => this.handleEmote(client, msg));
+    this.onMsg(ClientMsg.Ask, (client: CrewClient, msg: unknown) => this.handleAsk(client, msg));
+    this.onMsg(ClientMsg.Push, (client: CrewClient, msg: unknown) => this.handlePush(client, msg));
+    this.onMsg(AdminMsg.Ping, (client: CrewClient, msg: unknown) => {
+      const t = (msg as { t?: unknown })?.t;
+      if (typeof t === 'number') client.send(AdminServerMsg.Pong, { t });
+    });
+    this.onMsg(AdminMsg.ClientStats, (client: CrewClient, msg: unknown) => {
+      const stats = parseClientStats(msg);
+      if (stats) this.metrics.report(client.sessionId, stats);
+    });
+    this.onMsg(AdminMsg.Subscribe, (client: CrewClient, msg: unknown) => this.handleAdminSubscribe(client, msg));
+    this.onMsg(AdminMsg.Settings, (client: CrewClient, msg: unknown) => this.handleAdminSettings(client, msg));
+    this.onMsg(AdminMsg.Command, (client: CrewClient, msg: unknown) => this.handleAdminCommand(client, msg));
+    this.clock.setInterval(() => this.sendAdminStats(), 1000);
 
     this.clock.setInterval(() => this.persistPositions(), PERSIST_INTERVAL_MS);
     this.clock.setInterval(() => this.sampleTelemetry(), TELEMETRY_MS);
@@ -266,6 +290,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       }),
     );
     this.dirty.add(client.sessionId);
+    this.metrics.join(client.sessionId);
 
     this.emit('player.join', client.sessionId, { restored: !!saved, xp: profile.xp, skin: profile.skin });
     this.broadcast(ServerMsg.System, { text: `${player.name} на борту` });
@@ -299,6 +324,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     if (pz.mechanic === client.sessionId) pz.mechanic = '';
     this.state.players.delete(client.sessionId);
     this.dirty.delete(client.sessionId);
+    this.metrics.leave(client.sessionId);
+    this.adminSubs.delete(client.sessionId);
   }
 
   onDispose() {
@@ -607,6 +634,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   }
 
   private sayTo(client: CrewClient | null, agentId: string, text: string, source: 'script' | 'llm', extra: Partial<SayPayload> = {}) {
+    // Администратор заглушил агента — реплика не доходит ни до кого (и не пишется как прозвучавшая).
+    if (this.adminSettings.agents[agentId]?.muted) return null;
     const payload: SayPayload = { agentId, speaker: this.speakerOf(agentId), text, source, ...extra };
     if (client) client.send(ServerMsg.Say, payload);
     else this.broadcast(ServerMsg.Say, payload);
@@ -1094,6 +1123,126 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     for (const client of this.clients) this.sendViewsTo(client);
   }
 
+  // ───────────────────────── панель администратора
+
+  /** Регистрация обработчика с подсчётом входящих сообщений клиента (метрика «сообщений/с»). */
+  private onMsg(type: string, handler: (client: CrewClient, msg: unknown) => void) {
+    this.onMessage(type, (client: CrewClient, msg: unknown) => {
+      this.metrics.countMessage(client.sessionId);
+      handler(client, msg);
+    });
+  }
+
+  /** Администратор — хост комнаты (по имени из JWT, подделать нельзя). */
+  private isAdmin(client: CrewClient) {
+    return !!client.userData && client.userData.name === this.state.host;
+  }
+
+  private handleAdminSubscribe(client: CrewClient, msg: unknown) {
+    if (!this.isAdmin(client)) {
+      client.send(AdminServerMsg.Result, { ok: false, text: 'Панель доступна только администратору комнаты' } satisfies AdminResult);
+      return;
+    }
+    if ((msg as { on?: unknown })?.on === false) {
+      this.adminSubs.delete(client.sessionId);
+      return;
+    }
+    this.adminSubs.add(client.sessionId);
+    client.send(AdminServerMsg.Settings, this.adminSettings);
+    this.sendAdminStats();
+  }
+
+  private handleAdminSettings(client: CrewClient, msg: unknown) {
+    if (!this.isAdmin(client)) return;
+    const before = this.adminSettings;
+    this.adminSettings = mergeAdminSettings(before, msg);
+    this.emit('admin.settings', client.sessionId, {
+      mainNpcActivity: this.adminSettings.mainNpcActivity,
+      secondaryNpcActivity: this.adminSettings.secondaryNpcActivity,
+      agents: this.adminSettings.agents,
+    });
+    for (const id of this.adminSubs) this.clients.getById(id)?.send(AdminServerMsg.Settings, this.adminSettings);
+    // Поведение агентов уходит в снимок — agent-service подхватит его в промпт сразу.
+    if (JSON.stringify(before.agents) !== JSON.stringify(this.adminSettings.agents)) llmHub.pushSnapshot(this.roomId);
+  }
+
+  private handleAdminCommand(client: CrewClient, msg: unknown) {
+    if (!this.isAdmin(client)) return;
+    const res = this.runAdminCommand(msg as AdminCommand);
+    client.send(AdminServerMsg.Result, res satisfies AdminResult);
+    if (res.ok) this.emit('admin.command', client.sessionId, { command: (msg as AdminCommand).type, text: res.text });
+  }
+
+  private runAdminCommand(cmd: AdminCommand): AdminResult {
+    switch (cmd?.type) {
+      case 'goto': {
+        if (cmd.level === 'hub') {
+          this.state.finished = false;
+          this.enterLevel(HUB_LEVEL.id);
+          this.broadcast(ServerMsg.System, { text: 'Администратор вернул экипаж на борт' });
+          return { ok: true, text: 'Экипаж на борту' };
+        }
+        const i = cmd.level;
+        if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= EPOCHS.length) return { ok: false, text: 'Нет такой эпохи' };
+        const epoch = EPOCHS[i];
+        // Детали прошлых эпох засчитываются, будущих — снимаются: прогресс остаётся связным.
+        this.state.epoch = i;
+        this.state.finished = false;
+        this.state.parts.splice(0, this.state.parts.length, ...EPOCHS.slice(0, i).map((e) => e.part.id));
+        this.enterLevel(epoch.levelId);
+        this.broadcast(ServerMsg.System, { text: `Администратор перенёс экипаж: ${epoch.title}, ${epoch.year}` });
+        return { ok: true, text: `Перенос: ${epoch.title}` };
+      }
+      case 'rename': {
+        const name = typeof cmd.crewName === 'string' ? cmd.crewName.trim().slice(0, 40) : '';
+        if (!name) return { ok: false, text: 'Пустое название' };
+        this.state.crewName = name;
+        void this.setMetadata({ ...this.metadata, crewName: name });
+        return { ok: true, text: `Экипаж теперь «${name}»` };
+      }
+      case 'announce': {
+        const text = typeof cmd.text === 'string' ? cmd.text.trim().slice(0, 300) : '';
+        if (!text) return { ok: false, text: 'Пустое объявление' };
+        this.broadcast(ServerMsg.System, { text: `📢 ${text}` });
+        return { ok: true, text: 'Объявление отправлено' };
+      }
+      case 'resetCrates':
+        this.resetCrates();
+        return { ok: true, text: this.crates.length ? 'Ящики на местах' : 'На этом уровне нет ящиков' };
+      case 'openGate': {
+        const gate = this.closedGate();
+        if (!gate) return { ok: false, text: 'Закрытых ворот нет' };
+        this.openGate(gate, null, 'Администратор открыл ворота');
+        return { ok: true, text: 'Ворота открыты' };
+      }
+      case 'giveCoins': {
+        const n = typeof cmd.amount === 'number' && Number.isFinite(cmd.amount) ? Math.round(Math.min(1000, Math.max(1, cmd.amount))) : 0;
+        if (!n) return { ok: false, text: 'Неверная сумма' };
+        for (const m of this.members()) {
+          m.state.coins += n;
+          this.saveMember(m);
+        }
+        this.broadcast(ServerMsg.System, { text: `Администратор раздал всем по ${n} ${COIN_NAME}` });
+        return { ok: true, text: `Выдано по ${n}` };
+      }
+      default:
+        return { ok: false, text: 'Неизвестная команда' };
+    }
+  }
+
+  /** Сводка метрик — раз в секунду и только тем, у кого открыта панель. */
+  private sendAdminStats() {
+    if (this.adminSubs.size === 0) return;
+    const stats = this.metrics.build(
+      (sessionId) => {
+        const p = this.state.players.get(sessionId);
+        return p ? { name: p.name, connected: p.connected, isAdmin: p.name === this.state.host } : null;
+      },
+      { createdAt: this.createdAt, levelId: this.level.id, epoch: this.state.epoch },
+    );
+    for (const id of this.adminSubs) this.clients.getById(id)?.send(AdminServerMsg.Stats, stats);
+  }
+
   // ───────────────────────── снимок для LLM
 
   private snapshot(): SessionSnapshot {
@@ -1152,6 +1301,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
           },
         ];
       }),
+      agents: this.adminSettings.agents,
       lastSeq: timeseries.lastSeq,
     };
   }

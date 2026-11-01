@@ -104,6 +104,7 @@
         <button id="voice-mute" class="vk-btn vk-btn-tertiary" hidden title="Выключить или включить микрофон">🔇 Микрофон</button>
         <button id="voice-unblock" class="vk-btn vk-btn-tertiary" hidden title="Браузер заблокировал воспроизведение">🔊 Включить звук</button>
         <span class="grow"></span>
+        <button id="admin-btn" class="vk-btn vk-btn-tertiary" hidden title="Панель администратора">🛠 Админ</button>
         <button id="rating-btn" class="vk-btn vk-btn-tertiary" title="Рейтинг">🏆</button>
         <button id="invite" class="vk-btn vk-btn-primary">Пригласить</button>
         <button id="leave" class="vk-btn vk-btn-tertiary">Выйти</button>
@@ -152,6 +153,56 @@
         <ol id="rating-list" class="vk-list rating dark"></ol>
         <div class="vk-group-title">Мои значки</div>
         <ul id="my-badges" class="badges"></ul>
+      </section>
+
+      <section id="admin" class="vk-dark-card modal wide" hidden>
+        <div class="shop-head">
+          <h3>🛠 Панель администратора</h3>
+          <span id="admin-status"></span>
+          <button id="admin-close" class="vk-btn vk-btn-tertiary" title="Закрыть (Esc)">✕</button>
+        </div>
+        <nav class="admin-tabs">
+          <button data-tab="metrics">Метрики</button>
+          <button data-tab="npc">NPC и агенты</button>
+          <button data-tab="universe">Вселенная</button>
+        </nav>
+
+        <div class="admin-tab" data-tab="metrics">
+          <div id="admin-summary" class="admin-summary"></div>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Игрок</th><th>FPS</th><th>Ping, мс</th><th>Худший кадр</th><th>Память</th><th>Сообщ./с</th><th>Онлайн</th><th>Статус</th></tr>
+              </thead>
+              <tbody id="admin-clients"></tbody>
+            </table>
+          </div>
+          <p id="admin-server" class="muted"></p>
+          <p class="muted small">Каждый клиент шлёт FPS и ping раз в секунду; «ср.» и диапазон ping — за последнюю минуту, фоновые вкладки не учитываются.</p>
+        </div>
+
+        <div class="admin-tab" data-tab="npc" hidden>
+          <div class="vk-group-title">Активность NPC <small class="muted">(пока не влияет на игру)</small></div>
+          <label class="admin-slider">Активность основных NPC
+            <input id="admin-npc-main" type="range" min="0" max="100" step="1" value="50" />
+            <b id="admin-npc-main-val">50</b>
+          </label>
+          <label class="admin-slider">Активность второстепенных NPC
+            <input id="admin-npc-secondary" type="range" min="0" max="100" step="1" value="50" />
+            <b id="admin-npc-secondary-val">50</b>
+          </label>
+          <div class="vk-group-title">Агенты-персонажи</div>
+          <ul id="admin-agents" class="admin-agents"></ul>
+        </div>
+
+        <div class="admin-tab" data-tab="universe" hidden>
+          <div class="admin-row"><span>Название экипажа</span><input id="admin-crew-name" class="vk-input dark" maxlength="40" /><button id="admin-rename-btn" class="vk-btn vk-btn-secondary">Переименовать</button></div>
+          <div class="admin-row"><span>Перенести экипаж</span><select id="admin-goto" class="vk-input dark"></select><button id="admin-goto-btn" class="vk-btn vk-btn-secondary">Перенести</button></div>
+          <div class="admin-row"><span>Объявление всем</span><input id="admin-announce" class="vk-input dark" maxlength="300" placeholder="Текст в чат всем игрокам" /><button id="admin-announce-btn" class="vk-btn vk-btn-secondary">Отправить</button></div>
+          <div class="admin-row"><span>Выдать VK Coin всем</span><input id="admin-coins" class="vk-input dark" type="number" min="1" max="1000" value="10" /><button id="admin-coins-btn" class="vk-btn vk-btn-secondary">Выдать</button></div>
+          <div class="admin-row"><span>Уровень</span><button id="admin-crates-btn" class="vk-btn vk-btn-secondary">Сбросить ящики</button><button id="admin-gate-btn" class="vk-btn vk-btn-secondary">Открыть ворота</button></div>
+          <p class="muted small">Перенос в эпоху засчитывает детали всех предыдущих эпох и сбрасывает текущую головоломку.</p>
+        </div>
       </section>
 
       <section id="finale" hidden>
