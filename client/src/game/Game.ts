@@ -230,7 +230,9 @@ export class Game {
       this.updatePrompt(ctrl);
     }
     this.remotes.forEach((r) => r.update(dt));
-    this.world?.update(t, dt, this.camFocus.x);
+    const players: { x: number; y: number; z: number }[] = [...this.remotes.values()].map((r) => r.view.root.position);
+    if (this.local) players.push(this.local.ctrl);
+    this.world?.update(t, dt, this.camFocus.x, players);
     this.renderer.render(this.scene, this.camera);
   };
 
