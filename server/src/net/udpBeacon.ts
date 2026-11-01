@@ -1,6 +1,6 @@
 import dgram from 'node:dgram';
 import { config } from '../config.ts';
-import { primaryLanAddress, subnetBroadcastAddress } from './lan.ts';
+import { primaryLanAddress, subnetBroadcastAddresses } from './lan.ts';
 import type { ManagedRoomInfo } from '@chronolet/shared';
 import type { RoomBeacon } from '@chronolet/shared';
 
@@ -8,22 +8,53 @@ import type { RoomBeacon } from '@chronolet/shared';
  * UDP-бродкаст публичных комнат в LAN. Консюмера в браузере быть не может —
  * пакет слушает любой локальный тул (см. scripts/udp-listen.ts).
  *
- * macOS (BSD) не заворачивает исходящий broadcast в loopback: отправитель
- * не слышит свой же маяк. Поэтому пакет уходит в три цели сразу:
- * широковещательный адрес, directed broadcast подсети и 127.0.0.1 —
- * локальные слушатели гарантированно получают копию.
+ * Обход macOS-особенностей:
+ * 1. BSD не заворачивает исходящий broadcast в loopback: отправитель не
+ *    слышит свой же маяк → копия уходит на 127.0.0.1.
+ * 2. 255.255.255.255 уходит по маршруту по умолчанию, а не во все подсети.
+ *    Когда мак сам раздаёт сеть (Internet Sharing, bridge100) или команда
+ *    сидит в ZeroTier-сегменте (zt*), глобальный бродкаст их не покрывает →
+ *    маяк уходит отдельным пакетом на directed broadcast КАЖДОЙ подсети.
+ * 3. В каждом пакете host — адрес именно того интерфейса, чью подсеть мы
+ *    адресуем: клиент из этой подсети сможет по нему зайти (при раздаче
+ *    это 192.168.2.1, в ZeroTier — адрес zt-интерфейса).
  */
+
+/** Одна цель бродкаста: адрес-получатель и host, который кладём в beacon. */
+export interface BeaconTarget {
+  /** Куда шлём пакет (directed broadcast подсети / 255.255.255.255 / 127.0.0.1). */
+  target: string;
+  /** LAN-IP для поля host — адрес интерфейса этой подсети. */
+  host: string;
+}
+
+/**
+ * Чистая сборка целей (экспортирована для теста): глобальный адрес и
+ * loopback получают первичный LAN-IP, каждая подсеть — адрес своего
+ * интерфейса (перекрывает глобальный при совпадении, чтобы host был точным).
+ */
+export function buildBeaconTargets(
+  primary: string,
+  subnets: Array<{ address: string; broadcast: string }>,
+  globalBroadcast: string,
+): BeaconTarget[] {
+  const byTarget = new Map<string, string>([
+    [globalBroadcast, primary],
+    ['127.0.0.1', primary],
+  ]);
+  for (const { address, broadcast } of subnets) {
+    byTarget.set(broadcast, address);
+  }
+  return [...byTarget].map(([target, host]) => ({ target, host }));
+}
+
+function beaconTargets(): BeaconTarget[] {
+  return buildBeaconTargets(primaryLanAddress(), subnetBroadcastAddresses(), config.udp.broadcastAddress);
+}
 
 let socket: dgram.Socket | null = null;
 let timer: NodeJS.Timeout | null = null;
 let loggedError = false;
-
-function beaconTargets(): string[] {
-  const targets = new Set<string>([config.udp.broadcastAddress, '127.0.0.1']);
-  const subnet = subnetBroadcastAddress();
-  if (subnet !== null) { targets.add(subnet); }
-  return [...targets];
-}
 
 export function startUdpBeacon(getPublicRooms: () => Promise<ManagedRoomInfo[]>): void {
   if (timer !== null) { return; }
@@ -40,13 +71,12 @@ export function startUdpBeacon(getPublicRooms: () => Promise<ManagedRoomInfo[]>)
   timer = setInterval(() => {
     void getPublicRooms()
       .then((rooms) => {
-        const beaconBase = { host: primaryLanAddress(), port: config.port, ts: Date.now() };
         const targets = beaconTargets();
+        const ts = Date.now();
         for (const room of rooms) {
-          const beacon: RoomBeacon = { app: 'chronolet', roomId: room.roomId, crewName: room.crewName, ...beaconBase };
-          const payload = JSON.stringify(beacon);
-          for (const target of targets) {
-            socket?.send(payload, config.udp.port, target);
+          for (const { target, host } of targets) {
+            const beacon: RoomBeacon = { app: 'chronolet', roomId: room.roomId, crewName: room.crewName, host, port: config.port, ts };
+            socket?.send(JSON.stringify(beacon), config.udp.port, target);
           }
         }
       })
