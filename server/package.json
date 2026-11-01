@@ -11,7 +11,8 @@
     "test": "tsx --test src/**/*.test.ts",
     "playthrough": "tsx scripts/playthrough.ts",
     "llm-mock": "tsx scripts/llm-mock.ts",
-    "llm-contract": "tsx scripts/llm-contract.ts"
+    "llm-contract": "tsx scripts/llm-contract.ts",
+    "gate": "tsx scripts/gate.ts"
   },
   "dependencies": {
     "@chronolet/shared": "*",

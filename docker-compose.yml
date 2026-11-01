@@ -1,0 +1,205 @@
+# Весь «Колизиум» одной командой: игра + LiveKit (голос) + Ollama и agent-service (реплики NPC)
+# + расшифровка голоса (whisper, redis, transcriber).
+#
+#   npm run up        # = scripts/up.sh: LAN-IP для голоса, dev-сертификат, docker compose up -d --build
+#   npm run down      # остановить всё
+#   docker compose logs -f game agent-service
+#
+# Первый запуск — с интернетом: образы и модель (~2 ГБ). Дальше работает офлайн.
+# Игра: https://<хост>:2567 (самоподписанный сертификат — браузер попросит подтвердить один раз).
+# Без LLM: docker compose stop ollama agent-service — игра продолжит на заготовках.
+# На Mac Docker не использует GPU (Metal): быстрее нативная Ollama (`ollama serve`) и
+#   OLLAMA_URL=http://host.docker.internal:11434 npm run up -- game livekit livekit-tls agent-service
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: '-1'
+      OLLAMA_NUM_PARALLEL: '1'
+      OLLAMA_MAX_LOADED_MODELS: '1'
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Скачивает модель один раз; без интернета, если модель уже есть, просто завершается успешно.
+  ollama-pull:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+      MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    entrypoint: ['/bin/sh', '-c', 'ollama list | grep -q "^$$MODEL" || ollama pull "$$MODEL"']
+    restart: 'no'
+
+  agent-service:
+    build:
+      context: .
+      dockerfile: agent-service/Dockerfile
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      # Игра на хосте (npm start) — по https: сертификат самоподписанный, проверку TLS отключаем.
+      # В полном стеке (npm run up) scripts/up.sh подставляет https://game:2567.
+      SERVER_URL: ${SERVER_URL:-https://host.docker.internal:2567}
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      # Расшифровки голоса — NPC комментируют, о чём говорит экипаж (COMMENT_GAP_MS — как часто).
+      REDIS_URL: redis://redis:6379/0
+      COMMENT_GAP_MS: ${COMMENT_GAP_MS:-45000}
+      LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    # Linux: host.docker.internal → хост (на Mac/Windows работает и так).
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+  # Игра: сервер + собранный клиент на одном порту. БД и временные ряды — в ./data на хосте.
+  game:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - '2567:2567'
+    volumes:
+      - ./data:/app/data
+      - ./livekit/certs:/app/livekit/certs:ro
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}
+      # Пусто — адрес строится из хоста страницы: wss://<хост>:7880.
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
+      CHRONOLET_SOLO: ${CHRONOLET_SOLO:-0}
+      ANSWER_CLASSIFIER_URL: ${ANSWER_CLASSIFIER_URL:-http://answer-classifier:8000}
+    healthcheck:
+      test: ['CMD', 'node', '-e', "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';fetch('https://127.0.0.1:2567/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Голос. Медиа (UDP 50000-50100, TCP 7881) — напрямую; LIVEKIT_NODE_IP — LAN-IP хоста для ICE.
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    command: ['--config', '/etc/livekit.yaml', '--node-ip', '${LIVEKIT_NODE_IP:-127.0.0.1}']
+    environment:
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}'
+    ports:
+      - '7881:7881'
+      - '50000-50100:50000-50100/udp'
+    volumes:
+      - ./livekit/livekit.docker.yaml:/etc/livekit.yaml:ro
+    restart: unless-stopped
+
+  # wss://<хост>:7880 → livekit:17880. Без TLS браузеры на https-странице режут ws:// как mixed content.
+  livekit-tls:
+    image: node:22-alpine
+    command: ['node', '/app/scripts/livekit-tls.mjs']
+    depends_on:
+      - livekit
+    environment:
+      LIVEKIT_SIGNAL_HOST: livekit
+      LIVEKIT_SIGNAL_PORT: '17880'
+    ports:
+      - '7880:7880'
+    volumes:
+      - ./scripts/livekit-tls.mjs:/app/scripts/livekit-tls.mjs:ro
+      - ./livekit/certs:/app/livekit/certs:ro
+    restart: unless-stopped
+
+  # ---------- Расшифровка голосового чата (transcriber/README.md) ----------
+  # По умолчанию LiveKit — на хосте (npm run livekit). В полном стеке (npm run up) LiveKit — сервис
+  # livekit выше, и scripts/up.sh направляет агента на него (TRANSCRIBER_LIVEKIT_URL=ws://livekit:17880).
+  #   macOS (Docker Desktop):  docker compose up -d transcriber
+  #   Linux:                   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d transcriber
+  # Whisper и Redis наружу открыты только на 127.0.0.1 хоста (для отладки: :8770 и :6380).
+
+  whisper:
+    build: ./transcriber/whisper
+    ports:
+      - '127.0.0.1:8770:8000'
+    volumes:
+      - whisper-models:/models
+    environment:
+      # small — компромисс скорость/качество на CPU (замеры — transcriber/README.md).
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:%s/health" % os.environ.get("PORT", "8000"))']
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 10s
+    restart: unless-stopped
+
+  # Хранилище расшифровок: вся история, AOF на диск. 6380 — на хосте 6379 бывает занят своим Redis.
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    ports:
+      - '127.0.0.1:6380:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -p $${REDIS_PORT:-6379} ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  transcriber:
+    build: ./transcriber/agent
+    depends_on:
+      whisper:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # LiveKit на хосте слушает 127.0.0.1:17880; Docker Desktop пробрасывает
+      # host.docker.internal на loopback мака. Медиа агент шлёт на LAN-IP хоста.
+      LIVEKIT_URL: ${TRANSCRIBER_LIVEKIT_URL:-ws://host.docker.internal:17880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}
+      WHISPER_URL: http://whisper:8000
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+      REDIS_URL: redis://redis:6379/0
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+  # ---------- Вопросы-ворота NPC (answer-classifier/README.md) ----------
+  # 5 логрегов на bag of words (по одному на NPC), обучаются при сборке образа.
+  # Игровой сервер ходит на http://127.0.0.1:8780 (ANSWER_CLASSIFIER_URL).
+  #   macOS:  docker compose up -d answer-classifier
+  #   Linux:  docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d answer-classifier
+  answer-classifier:
+    build: ./answer-classifier
+    ports:
+      - '127.0.0.1:8780:8000'
+    environment:
+      ACCEPT_THRESHOLD: ${ACCEPT_THRESHOLD:-0.5}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:%s/health" % os.environ.get("PORT", "8000"))']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  ollama:
+  whisper-models:
+  redis-data:

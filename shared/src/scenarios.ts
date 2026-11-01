@@ -5,6 +5,8 @@
  */
 
 export type StepCondition =
+  /** Ворота у входа открыты: кто-то верно ответил NPC в чате. */
+  | { kind: 'gate' }
   /** Кто-то из экипажа выслушал агента (E у рассказчика). */
   | { kind: 'talked'; agent: string }
   /** Обе роли заняты. */
@@ -56,6 +58,7 @@ const BONUSES: ScenarioBonus[] = [
 
 function epochScenario(levelId: string, title: string, agent: string, narrator: string, puzzleStages: { goal: string; par: number }[], reachPar: number): ScenarioDef {
   const steps: ScenarioStep[] = [
+    { id: 'gate', title: 'Ворота', goal: `Ответьте на вопрос: ${narrator} — пишите ответ в чат`, done: { kind: 'gate' }, parSeconds: 60 },
     { id: 'briefing', title: 'Брифинг', goal: `Найдите и выслушайте: ${narrator}`, done: { kind: 'talked', agent }, parSeconds: 45, cue: `Сначала поговорите с местным: ${narrator}. Роли откроются после брифинга.` },
     { id: 'reach', title: 'К местам ролей', goal: 'Доберитесь до кругов ролей и займите обе (E)', done: { kind: 'roles' }, parSeconds: reachPar, rolesOpen: true, cue: 'Роли открыты. Дорога к ним — полоса препятствий: ящики, ветер, стрелы. Держитесь вместе.' },
   ];

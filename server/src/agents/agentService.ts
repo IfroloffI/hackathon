@@ -16,7 +16,7 @@ export class AgentService {
 
   start() {
     eventBus.on((e) => this.onEvent(e));
-    console.log(`[agents] ${this.llm ? `LLM: ${config.ollama.model} @ ${config.ollama.url}` : 'LLM выключена (OLLAMA_ENABLED=1 чтобы включить)'}`);
+    console.log(`[agents] ${this.llm ? `LLM: ${config.ollama.model} @ ${config.ollama.url}` : 'реплики NPC: заготовки + agent-service по /llm/stream (docker compose up -d)'}`);
   }
 
   private onEvent(e: GameEvent) {

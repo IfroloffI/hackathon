@@ -211,9 +211,12 @@ export class Game {
 
     const crates = this.cratePositions();
     this.world?.setCrates(crates);
+    const gateOpen = (this.room.state.gatesOpen ?? []).includes(this.worldLevelId);
+    this.world?.setGateOpen(gateOpen);
     if (this.local) {
       const { ctrl, view, state } = this.local;
       ctrl.crates = crates;
+      ctrl.gateOpen = ctrl.level.id === this.worldLevelId ? gateOpen : true;
       ctrl.update(dt);
       const hazard = ctrl.takeHazard();
       if (hazard) view.showBubble(HAZARD_BUBBLE[hazard], 1200);

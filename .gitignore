@@ -10,3 +10,7 @@ data/*.duckdb.wal
 data/.jwt-secret
 .cache/
 livekit/certs/
+
+# answer-classifier: модели обучаются при сборке образа (python train.py)
+answer-classifier/models/
+__pycache__/

@@ -27,7 +27,9 @@ export type PlatformLook =
   | 'trampoline'
   | 'fan'
   | 'arrows'
-  | 'moat';
+  | 'moat'
+  // Ворота у входа в эпоху: твёрдые, пока NPC не принял ответ на вопрос (см. withGate).
+  | 'gate';
 
 export interface Platform {
   /** Центр и размеры. Без z/d объект занимает всю глубину дорожки (стены, пол). */
@@ -92,6 +94,37 @@ export interface Level {
   crates?: CrateDef[];
   fans?: FanDef[];
   arrows?: ArrowTrap[];
+  /** Ворота у входа: закрыты, пока экипаж не ответит NPC `agent` на его вопрос (answer-classifier). */
+  gate?: GateDef;
+}
+
+export interface GateDef {
+  /** Центр створки по x — сразу справа от NPC, до первого препятствия. */
+  x: number;
+  /** Кто задаёт вопрос и чья модель решает (id агента, он же npc_id классификатора). */
+  agent: string;
+}
+
+/** Створка ворот: на всю глубину дорожки, выше прыжка (~2.4) — не перепрыгнуть и не обойти. */
+export const GATE_SIZE = { w: 0.8, h: 5 } as const;
+
+const gatePlatforms = new WeakMap<GateDef, Platform>();
+/** Твёрдая створка закрытых ворот (один объект на ворота — физика кэширует его границы). */
+export function gatePlatform(g: GateDef): Platform {
+  let p = gatePlatforms.get(g);
+  if (!p) gatePlatforms.set(g, (p = { x: g.x, y: GATE_SIZE.h / 2, w: GATE_SIZE.w, h: GATE_SIZE.h, color: 0x8a5a2b, kind: 'gate' }));
+  return p;
+}
+
+/** Уровень для физики: закрытые ворота — ещё одна твёрдая стена; открытые — как будто их нет. */
+export function withGate(level: Level, open: boolean): Level {
+  if (!level.gate || open) return level;
+  return { ...level, platforms: [...level.platforms, gatePlatform(level.gate)] };
+}
+
+/** Правее какого x игрок не может стоять, пока ворота закрыты (сервер режет телепорты сквозь створку). */
+export function gateBlockX(g: GateDef, playerHalfWidth: number): number {
+  return g.x - GATE_SIZE.w / 2 - playerHalfWidth;
 }
 
 export const COIN_PICKUP_RADIUS = 0.9;
@@ -206,6 +239,7 @@ export const ALEXANDRIA_LEVEL: Level = {
   title: 'Сиена и Александрия, ~240 до н. э.',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
+  gate: { x: -14, agent: 'eratosthenes' },
   platforms: [
     ground(-30, -12, SAND),
     ground(-9, 14, SAND),
@@ -261,6 +295,7 @@ export const PADUA_LEVEL: Level = {
   title: 'Падуя, 1610',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
+  gate: { x: -14.5, agent: 'galileo' },
   platforms: [
     ground(-30, -12, STONE),
     ...moat(-12, -9, 0x2a6f8a),
@@ -316,6 +351,7 @@ export const WOOLSTHORPE_LEVEL: Level = {
   title: 'Англия, 1687',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
+  gate: { x: -13.5, agent: 'newton' },
   platforms: [
     ground(-30, -12.5, GRASS),
     ...moat(-12.5, -7.5, 0x3fa0d0),
@@ -367,6 +403,7 @@ export const BLETCHLEY_LEVEL: Level = {
   title: 'Блетчли-парк, 1941',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
+  gate: { x: -15, agent: 'turing' },
   platforms: [
     ground(-30, -10, PARK),
     ...moat(-10, -7, 0x3a5a6a),
@@ -418,6 +455,7 @@ export const BAIKONUR_LEVEL: Level = {
   title: 'Байконур, 1961',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
+  gate: { x: -14, agent: 'korolev' },
   platforms: [
     ground(-30, -6, STEPPE),
     ground(-3, 34, STEPPE),

@@ -3,11 +3,23 @@ import assert from 'node:assert/strict';
 import { SCENARIOS } from '@chronolet/shared';
 import { ScenarioRuntime, type ScenarioFacts } from './scenario.ts';
 
-const facts = (f: Partial<ScenarioFacts> = {}): ScenarioFacts => ({ rolesFilled: false, stagesPassed: 0, solved: false, aboard: false, ...f });
+const facts = (f: Partial<ScenarioFacts> = {}): ScenarioFacts => ({ gateOpen: true, rolesFilled: false, stagesPassed: 0, solved: false, aboard: false, ...f });
+
+test('сценарий: ворота → брифинг: пока ворота закрыты, разговор и роли шаг не двигают', () => {
+  const r = new ScenarioRuntime('alexandria');
+  assert.equal(r.step?.id, 'gate');
+  assert.equal(r.rolesOpen, false);
+  assert.deepEqual(r.talkedTo('eratosthenes', facts({ gateOpen: false })), [], 'разговор у закрытых ворот — не брифинг');
+  assert.equal(r.step?.id, 'gate');
+  const c = r.update(facts());
+  assert.deepEqual(c.map((ch) => ch.from.id), ['gate', 'briefing'], 'ворота открыты, а с NPC уже говорили — оба шага');
+});
 
 test('сценарий: брифинг → роли → этапы → эвакуация, роли закрыты до брифинга', () => {
   let now = 0;
   const r = new ScenarioRuntime('padua', () => now);
+  assert.equal(r.step?.id, 'gate');
+  assert.equal(r.update(facts())[0].from.id, 'gate', 'ворота открыты — к брифингу');
   assert.equal(r.step?.id, 'briefing');
   assert.equal(r.rolesOpen, false);
   assert.deepEqual(r.update(facts({ rolesFilled: true })), [], 'роли без брифинга шаг не двигают');

@@ -82,6 +82,10 @@ export interface SessionSnapshot {
     attempts: number;
     solved: boolean;
     hintsGiven: number;
+    /** Тексты подсказок ТЕКУЩЕЙ партии (уровни 1..3). LLM их перефразирует, а не придумывает свои. */
+    hints: string[];
+    /** Какой уровень подсказки сервер дал бы следующим (по правилу «каждые 2 ошибки»), null — все выданы. */
+    nextHintLevel: 1 | 2 | 3 | null;
   } | null;
   crew: CrewMemberSnapshot[];
   /** Последний seq события этой сессии на момент снимка. */
@@ -101,6 +105,30 @@ export type LlmStreamMessage =
 
 /** Событие, на которое ждут ответа LLM: игрок спросил агента. Сервер ждёт /llm/say с replyTo до ASK_TIMEOUT_MS, потом отвечает заготовкой. */
 export const ASK_TIMEOUT_MS = 3000;
+
+/**
+ * Отвечаемые события (data.replyable === true): agent.ask, puzzle.failed, puzzle.stage, puzzle.solved.
+ * Пока LLM слушает сессию, сервер НЕ говорит сразу, а откладывает заготовку (data.fallback) на
+ * REACT_TIMEOUT_MS (для agent.ask — ASK_TIMEOUT_MS). Первый кусок /llm/say или /llm/hint с replyTo —
+ * «захват»: короткий таймер снимается, на финал (final=true) даётся STREAM_DEADLINE_MS, иначе сервер
+ * закроет поток накопленным текстом (или, если текста нет, скажет заготовку). Ответ с replyTo после
+ * того, как заготовка уже прозвучала, — 409 late и игроку не показывается: двойного голоса нет.
+ * «Отказ»: финальный кусок с replyTo и пустым text — сервер сразу говорит заготовку (LLM не успевает).
+ * На остальные события сервер говорит заготовками сам — LLM на них не отвечает (кроме idle: заготовки нет).
+ */
+export const REACT_TIMEOUT_MS = 2500;
+export const STREAM_DEADLINE_MS = 15000;
+
+/** Что лежит в data у отвечаемых событий (помимо полей конкретного события). */
+export interface ReplyableData {
+  replyable: true;
+  /** Агент, который должен ответить. */
+  agentId: string;
+  /** Заготовка, которая прозвучит, если LLM не ответит в срок. */
+  fallback: string | null;
+  /** Для puzzle.failed: подсказка, которую сервер дал бы сейчас — её и надо перефразировать (через /llm/hint). */
+  hint?: { level: 1 | 2 | 3; text: string } | null;
+}
 
 // ───────────────────────── REST: LLM → сервер
 
@@ -123,6 +151,10 @@ export interface LlmHintRequest {
   session: string;
   level: 1 | 2 | 3;
   text: string;
+  /** seq отвечаемого события (обычно puzzle.failed с data.hint) — правила как у /llm/say. */
+  replyTo?: number;
+  streamId?: string;
+  final?: boolean;
   to?: string;
 }
 
@@ -190,4 +222,6 @@ export interface LlmContentResponse {
   agents: readonly AgentProfile[];
   scenarios: readonly ScenarioDef[];
   eventTypes: GameEventType[];
+  /** Справочно: головоломки, роли и шаблоны подсказок (тексты конкретной партии — в snapshot.puzzle.hints). */
+  puzzles: { id: string; title: string; levelId: string; observer: string; mechanic: string }[];
 }

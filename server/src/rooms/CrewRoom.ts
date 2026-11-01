@@ -3,6 +3,8 @@ import {
   AGENT_PROFILES,
   ASK_TIMEOUT_MS,
   CRATE_PUSH_TTL_MS,
+  REACT_TIMEOUT_MS,
+  STREAM_DEADLINE_MS,
   ClientMsg,
   COIN_NAME,
   EMOTES,
@@ -21,6 +23,9 @@ import {
   colorForName,
   epochByLevel,
   getLevel,
+  gateBlockX,
+  PLAYER_SIZE,
+  type GateDef,
   getSkin,
   isNearStation,
   levelFromXp,
@@ -67,6 +72,7 @@ import { llmHub } from '../llm/hub.ts';
 import { createPuzzle, type ActionResult, type Puzzle } from '../puzzles/index.ts';
 import { NARRATOR_LINES, SHIP_AI_EVENTS } from '../agents/lines.ts';
 import { nextLine } from '../agents/memory.ts';
+import { classifyAnswer, gateNpcs } from '../agents/answerClassifier.ts';
 import { config } from '../config.ts';
 import { verifyToken } from '../auth/tokens.ts';
 
@@ -85,6 +91,14 @@ interface ClientData {
 
 type CrewClient = Client<{ userData: ClientData }>;
 
+interface PendingReply {
+  timer: ReturnType<typeof setTimeout>;
+  fallback: () => void;
+  claimed: boolean;
+  /** Накопленный текст потоковой реплики — им закрываем поток, если LLM не прислала финал. */
+  stream?: { id: string; agentId: string; text: string; target: CrewClient | null; hint?: number };
+}
+
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROLE_NAME: Record<Role, string> = { observer: 'Наблюдатель', mechanic: 'Механик' };
 /** «На борту» в эпохе — в пределах этого расстояния от станции возврата. */
@@ -94,6 +108,8 @@ const IDLE_AFTER_MS = 30_000;
 const LIKE_COOLDOWN_MS = 15_000;
 const EMOTE_COOLDOWN_MS = 800;
 const CRATE_TICK_MS = 33;
+/** Через сколько после входа в эпоху NPC у закрытых ворот сам задаёт вопрос (после реплики ХРОНОСа). */
+const GATE_QUESTION_DELAY_MS = 3500;
 
 function normalizeName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim().slice(0, 20) : '';
@@ -129,8 +145,14 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       this.emit('achievement', m.sessionId, { id, title: achievement(id)?.title });
     },
   });
-  /** Вопросы к агентам, ждущие ответа LLM (seq события agent.ask → таймер фолбэка). */
-  private pendingAsks = new Map<number, { timer: ReturnType<typeof setTimeout> }>();
+  /**
+   * Отвечаемые события, ждущие LLM (seq → отложенная заготовка). До «захвата» таймер короткий
+   * (ASK/REACT_TIMEOUT_MS), после первого куска с replyTo — STREAM_DEADLINE_MS на финал.
+   * Сработал таймер — звучит заготовка, а поздний ответ LLM получит 409 late (один голос).
+   */
+  private pendingReplies = new Map<number, PendingReply>();
+  /** Комната закрыта — асинхронные ответы (answer-classifier) уже некому слать. */
+  private disposing = false;
   private likeCooldown = new Map<string, number>();
   private emoteCooldown = new Map<string, number>();
   private viewTimer?: ReturnType<typeof setTimeout>;
@@ -280,9 +302,10 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   }
 
   onDispose() {
+    this.disposing = true;
     this.persistPositions();
     clearTimeout(this.viewTimer);
-    for (const a of this.pendingAsks.values()) clearTimeout(a.timer);
+    for (const a of this.pendingReplies.values()) clearTimeout(a.timer);
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     sessions.finish(this.roomId);
     this.emit('session.end', null, { parts: [...this.state.parts], finished: this.state.finished });
@@ -341,7 +364,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const fell = typeof rawY === 'number' && rawY < this.level.bounds.minY;
     const fellAt = p.x;
     const now = Date.now();
-    const move = sanitizeMove(msg, p, now - data.lastMoveAt, this.level);
+    const gate = this.closedGate();
+    const move = sanitizeMove(msg, p, now - data.lastMoveAt, this.level, gate ? gateBlockX(gate, PLAYER_SIZE.w / 2) : null);
     data.lastMoveAt = now;
     if (!move) return;
 
@@ -399,13 +423,71 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const { name } = client.userData;
     this.broadcast(ServerMsg.Chat, { from: client.sessionId, name, text, ts: Date.now() } satisfies ChatBroadcast);
     this.emit('chat', client.sessionId, { text });
-    // «@Галилей почему…» — вопрос агенту.
+    // Ворота закрыты — каждое сообщение в чат считается ответом NPC у ворот
+    // (можно и «@Эратосфен Архимед»). Решает answer-classifier, не LLM.
+    const gate = this.closedGate();
     const m = /^@(\S+)\s*(.*)$/s.exec(text);
-    if (m) {
-      const who = m[1].toLowerCase().replace(/[,:]$/, '');
-      const agent = AGENT_PROFILES.find((a) => a.name.toLowerCase() === who || a.id === who);
-      if (agent) this.ask(client, agent.id, m[2]);
+    const who = m?.[1].toLowerCase().replace(/[,:]$/, '');
+    const agent = who ? AGENT_PROFILES.find((a) => a.name.toLowerCase() === who || a.id === who) : undefined;
+    if (gate && (!m || agent?.id === gate.agent)) {
+      const answer = (agent ? m![2] : text).trim();
+      if (answer) void this.gateAnswer(client, answer);
+      else void this.askGateQuestion(null);
+      return;
     }
+    // «@Галилей почему…» — вопрос агенту.
+    if (agent) this.ask(client, agent.id, m![2]);
+  }
+
+  // ───────────────────────── ворота у входа в эпоху (answer-classifier)
+
+  /** Ворота текущего уровня, если они есть и ещё закрыты. */
+  private closedGate(): GateDef | null {
+    const gate = this.level.gate;
+    return gate && !this.state.gatesOpen.includes(this.level.id) ? gate : null;
+  }
+
+  /**
+   * NPC у ворот задаёт свой вопрос (всем или одному). Открывает ворота только верный ответ (gateAnswer):
+   * нет сервиса — ворота остаются закрытыми, игроки видят, что судья недоступен.
+   */
+  private async askGateQuestion(target: CrewClient | null) {
+    const gate = this.closedGate();
+    if (!gate) return;
+    const npc = (await gateNpcs())?.[gate.agent];
+    if (this.disposing || this.closedGate() !== gate) return;
+    if (!npc) {
+      const text = 'Ворота закрыты: судья ответов (answer-classifier) недоступен — запустите его и спросите снова';
+      if (target) target.send(ServerMsg.System, { text });
+      else this.broadcast(ServerMsg.System, { text });
+      return;
+    }
+    this.sayTo(target, gate.agent, npc.question, 'script');
+  }
+
+  /** Ответ игрока на вопрос у ворот: модель решает, NPC всем отвечает «да»/«нет». */
+  private async gateAnswer(client: CrewClient, answer: string) {
+    const gate = this.closedGate();
+    if (!gate) return;
+    const [npc, verdict] = await Promise.all([gateNpcs(), classifyAnswer(gate.agent, answer)]);
+    // Пока ждали — ворота уже открыл другой ответ, или экипаж сменил уровень.
+    if (this.disposing || this.closedGate() !== gate) return;
+    const lines = npc?.[gate.agent];
+    if (!lines || !verdict) {
+      client.send(ServerMsg.System, { text: 'Ворота не отвечают: сервис answer-classifier недоступен' });
+      return;
+    }
+    this.emit('gate.answer', client.sessionId, { agentId: gate.agent, text: answer, accepted: verdict.accepted, probability: verdict.probability });
+    this.sayTo(null, gate.agent, verdict.accepted ? lines.accept : lines.reject, 'script');
+    if (verdict.accepted) this.openGate(gate, client, `${client.userData?.name ?? 'Кто-то'} ответил верно — ворота открыты!`);
+  }
+
+  private openGate(gate: GateDef, by: CrewClient | null, text: string) {
+    if (this.closedGate() !== gate) return;
+    this.state.gatesOpen.push(this.level.id);
+    this.broadcast(ServerMsg.System, { text });
+    this.emit('gate.open', by?.sessionId ?? null, { agentId: gate.agent });
+    this.advance(this.scenario.update(this.facts()));
   }
 
   // ───────────────────────── VK Coin, магазин, лайки, эмоции
@@ -492,13 +574,32 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
       const lines = NARRATOR_LINES[agentId];
       if (lines) this.sayTo(client, agentId, nextLine(agentId, client.userData!.playerId, lines), 'script');
     };
-    const e = this.emit('agent.ask', client.sessionId, { agentId, text });
-    if (!llmHub.listening(this.roomId)) return fallback();
+    const listening = llmHub.listening(this.roomId);
+    // fallback: null — заготовка вопроса выбирается по памяти агента в момент срабатывания.
+    const e = this.emit('agent.ask', client.sessionId, { agentId, text, ...(listening ? { replyable: true, fallback: null } : {}) });
+    if (!listening) return fallback();
+    this.defer(e.seq, ASK_TIMEOUT_MS, fallback);
+  }
+
+  /** Отложить заготовку до ответа LLM на событие seq (см. REACT_TIMEOUT_MS в shared/src/llm.ts). */
+  private defer(seq: number, ms: number, fallback: () => void) {
     const timer = setTimeout(() => {
-      this.pendingAsks.delete(e.seq);
+      this.pendingReplies.delete(seq);
       fallback();
-    }, ASK_TIMEOUT_MS);
-    this.pendingAsks.set(e.seq, { timer });
+    }, ms);
+    this.pendingReplies.set(seq, { timer, fallback, claimed: false });
+  }
+
+  /**
+   * Реплика ХРОНОСа на отвечаемое событие: если LLM слушает — событие помечается replyable с этой
+   * заготовкой и подсказкой, а сама заготовка откладывается; иначе звучит сразу, как раньше.
+   */
+  private shipReact(type: GameEventType, sessionId: string, data: Record<string, unknown>, fallback: string, hint?: { level: 1 | 2 | 3; text: string }) {
+    const listening = llmHub.listening(this.roomId);
+    const e = this.emit(type, sessionId, listening ? { ...data, replyable: true, agentId: SHIP_AI.id, fallback, hint: hint ?? null } : data);
+    const say = () => this.shipSay(fallback, hint?.level);
+    if (listening) this.defer(e.seq, REACT_TIMEOUT_MS, say);
+    else say();
   }
 
   private speakerOf(agentId: string) {
@@ -514,11 +615,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   }
 
   private shipSay(text: string, hint?: number) {
-    if (hint) {
-      this.scenario.hints++;
-      this.state.puzzle.hintsGiven = this.scenario.hints;
-      this.emit('hint', null, { level: hint, text, source: 'script' });
-    }
+    if (hint) this.countHint(null, hint, text, 'script');
     this.sayTo(null, SHIP_AI.id, text, 'script', hint ? { hint } : {});
   }
 
@@ -527,33 +624,74 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const agent = AGENT_PROFILES.find((a) => a.id === req?.agentId);
     if (!agent) return { ok: false, error: 'unknown agentId' };
     if (typeof req.text !== 'string' || (!req.text.trim() && !req.streamId)) return { ok: false, error: 'text required' };
-    const text = req.text.slice(0, agent.maxChars);
+    return this.llmReply(req, agent.id, req.text.slice(0, agent.maxChars));
+  }
+
+  /** POST /llm/hint — подсказка ХРОНОСа от LLM (считается в «без подсказок» один раз — на финальном тексте). */
+  private llmHint(req: LlmHintRequest): LlmAck {
+    if (![1, 2, 3].includes(req?.level) || typeof req.text !== 'string' || (!req.text.trim() && !req.streamId)) {
+      return { ok: false, error: 'level 1..3 and text required' };
+    }
+    return this.llmReply(req, SHIP_AI.id, req.text.slice(0, 240), req.level);
+  }
+
+  /** Общий путь реплик LLM: адресат, захват/финал отвечаемого события, потоковые куски. */
+  private llmReply(req: LlmSayRequest | LlmHintRequest, agentId: string, text: string, hint?: number): LlmAck {
     const target = req.to ? this.clientByPlayerId(req.to) : null;
     if (req.to && !target) return { ok: false, error: 'player not in session' };
+    const final = !req.streamId || !!req.final;
+
     if (typeof req.replyTo === 'number') {
-      const pending = this.pendingAsks.get(req.replyTo);
-      if (pending) {
+      const pending = this.pendingReplies.get(req.replyTo);
+      // Заготовка уже прозвучала (или событие не ждало ответа) — молчим, чтобы не было двух голосов.
+      if (!pending) return { ok: false, error: 'late' };
+      if (!pending.claimed) {
         clearTimeout(pending.timer);
-        this.pendingAsks.delete(req.replyTo);
+        pending.claimed = true;
+        pending.timer = setTimeout(() => this.expireReply(req.replyTo!), STREAM_DEADLINE_MS);
+      }
+      if (final && !text.trim()) {
+        // «Отказ»: пустой финал — LLM не справилась (Ollama медленная/упала), заготовка звучит сразу.
+        clearTimeout(pending.timer);
+        this.pendingReplies.delete(req.replyTo);
+        if (pending.stream?.text.trim()) this.expireStream(pending.stream);
+        else pending.fallback();
+        return { ok: true };
+      }
+      if (final) {
+        clearTimeout(pending.timer);
+        this.pendingReplies.delete(req.replyTo);
+      } else {
+        pending.stream = { id: req.streamId!, agentId, text, target, hint };
       }
     }
-    const partial = !!req.streamId && !req.final;
-    const e = this.sayTo(target, agent.id, text, 'llm', req.streamId ? { streamId: req.streamId, partial } : {});
+
+    const extra: Partial<SayPayload> = req.streamId ? { streamId: req.streamId, partial: !final } : {};
+    if (hint) extra.hint = hint;
+    if (hint && final) this.countHint(target, hint, text, 'llm');
+    const e = this.sayTo(target, agentId, text, 'llm', extra);
     return { ok: true, seq: e?.seq };
   }
 
-  /** POST /llm/hint — подсказка ХРОНОСа от LLM (считается в «без подсказок»). */
-  private llmHint(req: LlmHintRequest): LlmAck {
-    if (![1, 2, 3].includes(req?.level) || typeof req.text !== 'string' || !req.text.trim()) return { ok: false, error: 'level 1..3 and text required' };
-    const target = req.to ? this.clientByPlayerId(req.to) : null;
-    if (req.to && !target) return { ok: false, error: 'player not in session' };
+  /** LLM захватила ответ, но не прислала финал за STREAM_DEADLINE_MS: закрываем тем, что успело прийти, иначе заготовка. */
+  private expireReply(seq: number) {
+    const pending = this.pendingReplies.get(seq);
+    if (!pending) return;
+    this.pendingReplies.delete(seq);
+    if (pending.stream?.text.trim()) this.expireStream(pending.stream);
+    else pending.fallback();
+  }
+
+  /** Закрыть потоковую реплику тем текстом, что успел прийти. */
+  private expireStream(s: NonNullable<PendingReply['stream']>) {
+    if (s.hint) this.countHint(s.target, s.hint, s.text, 'llm');
+    this.sayTo(s.target, s.agentId, s.text, 'llm', { streamId: s.id, partial: false, ...(s.hint ? { hint: s.hint } : {}) });
+  }
+
+  private countHint(target: CrewClient | null, level: number, text: string, source: 'script' | 'llm') {
     this.scenario.hints++;
     this.state.puzzle.hintsGiven = this.scenario.hints;
-    const e = this.emit('hint', target?.sessionId ?? null, { level: req.level, text: req.text, source: 'llm' });
-    const payload: SayPayload = { agentId: SHIP_AI.id, speaker: SHIP_AI.name, text: req.text.slice(0, 240), hint: req.level, source: 'llm' };
-    if (target) target.send(ServerMsg.Say, payload);
-    else this.broadcast(ServerMsg.Say, payload);
-    return { ok: true, seq: e.seq };
+    this.emit('hint', target?.sessionId ?? null, { level, text, source });
   }
 
   private clientByPlayerId(playerId: string): CrewClient | null {
@@ -573,6 +711,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     switch (station.kind) {
       case 'narrator': {
         const agent = station.agent ?? SHIP_AI.id;
+        // Пока ворота закрыты, хозяин ворот только повторяет вопрос — брифинг после ответа.
+        if (this.closedGate()?.agent === agent) return void this.askGateQuestion(client);
         this.ask(client, agent, '');
         this.advance(this.scenario.talkedTo(agent, this.facts()));
         return;
@@ -782,9 +922,21 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     void this.setMetadata({ ...this.metadata, epoch: this.state.epoch });
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     this.emit('level.enter', null, { levelId, epoch: this.state.epoch });
+    if (this.level.gate && !config.answerClassifier.enabled && !this.state.gatesOpen.includes(levelId)) {
+      this.state.gatesOpen.push(levelId); // ворота выключены (ANSWER_CLASSIFIER_ENABLED=0) — как раньше
+    }
+    // Ворота уже открыты (вернулись в эпоху) или выключены — шаг «Ворота» пропускаем молча: без бонуса и реплик.
+    this.scenario.update(this.facts());
     this.syncScenario();
     const cue = this.scenario.step?.cue;
     if (cue) this.shipSay(cue);
+    // NPC у закрытых ворот задаёт вопрос сам — чуть после реплики ХРОНОСа о прибытии.
+    if (this.closedGate()) {
+      const at = this.level;
+      setTimeout(() => {
+        if (this.level === at) void this.askGateQuestion(null);
+      }, GATE_QUESTION_DELAY_MS);
+    }
     llmHub.pushSnapshot(this.roomId);
   }
 
@@ -798,6 +950,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   private facts(): ScenarioFacts {
     const pz = this.state.puzzle;
     return {
+      gateOpen: !this.closedGate(),
       rolesFilled: !!pz.observer && !!pz.mechanic,
       stagesPassed: this.puzzle?.stagesPassed ?? 0,
       solved: !!this.puzzle?.solved,
@@ -878,20 +1031,24 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
 
     const holders = this.members().filter((m) => m.sessionId === pz.observer || m.sessionId === pz.mechanic);
     if (res.event === 'attempt_failed') {
-      this.emit('puzzle.failed', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, message: res.message ?? null });
       // Подсказки по нарастающей: каждые 2 неудачи — следующий уровень (намёк → направление → почти ответ).
-      const level = Math.min(3, Math.floor(puzzle.attempts / 2));
-      if (puzzle.attempts % 2 === 0 && level > 0) this.shipSay(puzzle.hints[level - 1], level);
-      else this.shipSay(SHIP_AI_EVENTS.attemptFailed[(puzzle.attempts - 1) % SHIP_AI_EVENTS.attemptFailed.length]);
+      const level = Math.min(3, Math.floor(puzzle.attempts / 2)) as 0 | 1 | 2 | 3;
+      const hint = puzzle.attempts % 2 === 0 && level > 0 ? { level: level as 1 | 2 | 3, text: puzzle.hints[level - 1] } : undefined;
+      const line = hint?.text ?? SHIP_AI_EVENTS.attemptFailed[(puzzle.attempts - 1) % SHIP_AI_EVENTS.attemptFailed.length];
+      this.shipReact('puzzle.failed', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, message: res.message ?? null }, line, hint);
     } else if (res.event === 'stage_passed') {
-      this.emit('puzzle.stage', client.sessionId, { puzzle: puzzle.id, stages: puzzle.stagesPassed, message: res.message ?? null });
       for (const m of holders) this.progression.grant(m, XP.stagePassed, 'этап головоломки');
-      this.shipSay(SHIP_AI_EVENTS.stagePassed);
+      this.shipReact('puzzle.stage', client.sessionId, { puzzle: puzzle.id, stages: puzzle.stagesPassed, message: res.message ?? null }, SHIP_AI_EVENTS.stagePassed);
     } else if (res.event === 'solved') {
-      this.emit('puzzle.solved', client.sessionId, { puzzle: puzzle.id, attempts: puzzle.attempts, hints: this.scenario.hints });
       for (const m of this.members()) this.progression.grant(m, XP.solved, 'головоломка решена');
       if (puzzle.attempts === 0) for (const m of holders) this.progression.unlock(m, 'flawless');
-      this.awardPart();
+      const part = this.awardPart();
+      this.shipReact(
+        'puzzle.solved',
+        client.sessionId,
+        { puzzle: puzzle.id, attempts: puzzle.attempts, hints: this.scenario.hints, part: part?.name ?? null },
+        part ? SHIP_AI_EVENTS.solved(part.name) : SHIP_AI_EVENTS.stagePassed,
+      );
     }
     this.advance(this.scenario.update(this.facts()));
     this.sendAllViews();
@@ -911,16 +1068,16 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     }, Math.max(0, at - Date.now()) + 20);
   }
 
-  /** Деталь выдаёт только игровая логика (правило 5 дизайн-дока). */
+  /** Деталь выдаёт только игровая логика (правило 5 дизайн-дока). Реплику о детали говорит вызывающий. */
   private awardPart() {
     const epoch = epochByLevel(this.level.id);
-    if (!epoch || this.state.parts.includes(epoch.part.id)) return;
+    if (!epoch || this.state.parts.includes(epoch.part.id)) return null;
     this.state.parts.push(epoch.part.id);
     this.state.epoch = this.state.parts.length;
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     this.emit('part.awarded', null, { part: epoch.part.id, name: epoch.part.name });
     for (const m of this.members()) this.progression.unlock(m, 'first_part');
-    this.shipSay(SHIP_AI_EVENTS.solved(epoch.part.name));
+    return epoch.part;
   }
 
   /** Каждой роли — только её вид. Свободные руки видят лишь публичный stage из state. */
@@ -963,7 +1120,16 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
             }
           : null,
       puzzle: this.puzzle
-        ? { id: this.puzzle.id, title: pz.title, stage: pz.stage, attempts: pz.attempts, solved: pz.solved, hintsGiven: this.scenario.hints }
+        ? {
+            id: this.puzzle.id,
+            title: pz.title,
+            stage: pz.stage,
+            attempts: pz.attempts,
+            solved: pz.solved,
+            hintsGiven: this.scenario.hints,
+            hints: [...this.puzzle.hints],
+            nextHintLevel: this.puzzle.solved ? null : (Math.min(3, (pz.attempts + (pz.attempts % 2 === 0 ? 2 : 1)) / 2) as 1 | 2 | 3),
+          }
         : null,
       crew: (this.clients as unknown as CrewClient[]).flatMap((c) => {
         const p = this.state.players.get(c.sessionId);

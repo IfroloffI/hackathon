@@ -5,7 +5,8 @@
   "workspaces": [
     "shared",
     "server",
-    "client"
+    "client",
+    "agent-service"
   ],
   "engines": {
     "node": ">=22.13"
@@ -17,9 +18,12 @@
     "dev": "concurrently -k -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client",
     "start": "npm run start -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
-    "test": "npm test -w shared && npm test -w server",
-    "livekit": "concurrently -k -n livekit,tls -c blue,green \"bash scripts/livekit.sh\" \"node scripts/livekit-tls.mjs\""
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client && npm run typecheck -w agent-service",
+    "test": "npm test -w shared && npm test -w server && npm test -w agent-service",
+    "livekit": "concurrently -k -n livekit,tls -c blue,green \"bash scripts/livekit.sh\" \"node scripts/livekit-tls.mjs\"",
+    "up": "bash scripts/up.sh",
+    "down": "docker compose down",
+    "frontend": "bash scripts/frontend.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

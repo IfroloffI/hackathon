@@ -1,4 +1,8 @@
-/** Минимальный клиент локальной Ollama. Не используется, пока OLLAMA_ENABLED != 1. */
+/**
+ * Минимальный клиент локальной Ollama. Не используется, пока OLLAMA_ENABLED != 1.
+ * TODO: реплики NPC генерирует отдельный agent-service/ (контракт chronolet.llm/1, стриминг) —
+ * этот клиент оставлен для совместимости; кандидат на удаление после отказа от OLLAMA_ENABLED.
+ */
 export class OllamaClient {
   constructor(
     private url: string,

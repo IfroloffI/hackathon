@@ -15,7 +15,8 @@
 ```
 
 - **LLM подписывается на поток и сама решает, когда говорить.** Сервер не вызывает LLM.
-- **Игра никогда не ждёт LLM.** На вопрос игрока сервер даёт LLM `ASK_TIMEOUT_MS = 3000` мс, потом сам отвечает заготовкой.
+- **Игра никогда не ждёт LLM.** На отвечаемое событие сервер даёт LLM `ASK_TIMEOUT_MS = 3000` мс (вопрос) / `REACT_TIMEOUT_MS = 2500` мс (головоломка), потом сам говорит заготовку.
+- **Один голос.** На отвечаемые события (`data.replyable: true`) сервер не говорит сразу, а ждёт LLM; ответ после заготовки отклоняется (`409 late`). На остальные события сервер говорит заготовками сам — LLM на них молчит.
 - **LLM отвечает за слова, не за правила.** Детали, роли, проверку решений и монеты решает только сервер. Через контракт нельзя изменить состояние игры — только сказать реплику, дать подсказку, записать память.
 - Один хост, без интернета: LLM-сервис ходит на `http://<host>:2567`.
 
@@ -72,6 +73,8 @@
 | `agent.ask` | `agentId, text` | **игрок спросил агента — ответьте в течение 3 с** (`text` пустой = подошёл поговорить) |
 | `agent.say` | `agentId, text, source, to` | история реплик |
 | `chat` | `text` | контекст разговора экипажа |
+| `gate.answer` | `agentId, text, accepted, probability` | ответ на вопрос у ворот эпохи (решает answer-classifier, не LLM) |
+| `gate.open` | `agentId` | ворота у входа открылись — можно поздравить экипаж |
 | `coin.pickup`, `fall`, `idle`, `like`, `emote`, `xp`, `achievement`, `shop.buy` | см. `server/src/rooms/CrewRoom.ts` | повод для ехидных комментариев ХРОНОСа |
 | `finale` | `parts` | финальная речь |
 
@@ -79,15 +82,39 @@
 
 Состояние «сейчас»: уровень, эпоха, детали, текущий шаг сценария (`goal`, `stepStartedAt`, `parSeconds`), головоломка (`stage`, `attempts`, `hintsGiven`), экипаж (роль, позиция, `idleSeconds`, `falls`, `xp`, `level`, `coins`, `skin`). Удобен для сборки промпта без истории.
 
+## 3.3. Отвечаемые события и согласование голоса
+
+Отвечаемые: `agent.ask`, `puzzle.failed`, `puzzle.stage`, `puzzle.solved` — только пока LLM подключена к потоку. В `data` у них (`ReplyableData`):
+
+| Поле | Что это |
+|---|---|
+| `replyable: true` | ответ с `replyTo = event.seq` ждут |
+| `agentId` | кто должен говорить (`ship_ai` или рассказчик) |
+| `fallback` | заготовка, которая прозвучит без ответа (`null` у `agent.ask` — выбирается по памяти) |
+| `hint` | у `puzzle.failed`: `{ level, text }` — подсказка, которую сервер дал бы сейчас. **Её надо перефразировать через `/llm/hint`, не придумывать свою.** Все тексты подсказок партии — в `snapshot.puzzle.hints`, следующий уровень — `nextHintLevel` |
+
+Жизненный цикл ответа:
+
+```
+событие ──REACT/ASK_TIMEOUT──▶ заготовка (ответ после неё → 409 late)
+   │
+   └─ кусок с replyTo («захват», можно пустой — «печатает…»)
+         ├─ final=true с текстом          → реплика LLM, заготовки не будет
+         ├─ final=true с ПУСТЫМ текстом   → «отказ»: заготовка звучит сразу
+         └─ нет финала STREAM_DEADLINE_MS (15 с) → сервер закрывает накопленным текстом (или заготовкой)
+```
+
+Подсказка засчитывается в `hintsGiven` один раз — тем путём, которым прозвучала (заготовка или `/llm/hint`).
+
 ## 4. REST: LLM → сервер
 
 | Метод | Путь | Тело / параметры | Ответ |
 |---|---|---|---|
-| POST | `/llm/say` | `LlmSayRequest` | `LlmAck` |
-| POST | `/llm/hint` | `LlmHintRequest` | `LlmAck` |
+| POST | `/llm/say` | `LlmSayRequest` | `LlmAck`; `409` — опоздал (заготовка уже прозвучала) |
+| POST | `/llm/hint` | `LlmHintRequest` (+ `replyTo`, `streamId`, `final`) | `LlmAck`; `409` — опоздал |
 | POST | `/llm/memory` | `LlmMemoryRequest` | `{ ok }` |
 | GET | `/llm/memory/:agentId/:playerId` | — | `LlmMemory` |
-| GET | `/llm/content` | — | агенты (`persona`, `knowsUntil`, `maxChars`), сценарии, список типов событий |
+| GET | `/llm/content` | — | агенты (`persona`, `knowsUntil`, `maxChars`), сценарии, типы событий, головоломки (что видит/делает каждая роль) |
 | GET | `/llm/sessions` | — | `{ sessions: SessionSnapshot[] }` |
 | GET | `/llm/sessions/:id/snapshot` | — | `SessionSnapshot` |
 | GET | `/llm/sessions/:id/events` | `since`, `types=a,b`, `limit` (≤5000) | `{ events, lastSeq }` |
@@ -135,10 +162,19 @@
 - Подключена, но не ответила за 3 с на `agent.ask` → заготовка.
 - Сценарные реплики ХРОНОСа (вход в эпоху, роли, детали) звучат всегда, LLM может их дополнять.
 
-## 8. Как проверить свою реализацию
+## 8. Реализация: `agent-service/` + Ollama
+
+`docker compose up -d` поднимает Ollama с `qwen2.5:3b` и `agent-service` (TypeScript, Node 22). Сервис:
+слушает поток (с догоном по `since`), отвечает на отвечаемые события и простой (`idle`), собирает промпт
+из `persona` + снимка (`puzzle.stage`, `attempts`, `scenario.goal`, `crew.idleSeconds`) + ленты недавних событий
++ памяти игрока, стримит ответ Ollama кусками, перефразирует подсказки партии (числа обязаны сохраниться — иначе отказ),
+пишет память. Лог каждой реплики: `source=llm|fallback|timeout`, `ttft`, `total`. Подробнее — `agent-service/README.md`.
+
+## 9. Как проверить
 
 ```bash
-npm run dev                              # сервер с LLM_SERVICE_TOKEN=dev-llm-token
-npm run llm-mock -w server               # образец LLM-сервиса: логирует поток, отвечает на вопросы
-npm run llm-contract -w server           # автопроверка контракта (поток, реплей, стрим, подсказки, ряды, память, фолбэк)
+npm run dev                                   # сервер с LLM_SERVICE_TOKEN=dev-llm-token
+npm run llm-contract -w server                # с встроенным образцом + ручные проверки (захват, отказ, late, срок, подсказки)
+docker compose up -d                          # настоящий сервис
+LLM_EXTERNAL=1 npm run llm-contract -w server # тот же контракт против настоящего сервиса
 ```
