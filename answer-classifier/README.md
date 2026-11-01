@@ -79,7 +79,7 @@ docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d answer-cl
 - Верный ответ — ворота открываются для всех (`state.gatesOpen`), створка сворачивается вверх, сценарий
   переходит от шага «Ворота» к брифингу. Дальше чат обычный, `@NPC` — вопрос рассказчику, как раньше.
 - События: `gate.answer` (`agentId, text, accepted, probability`), `gate.open`.
-- Сервис недоступен — ворота открываются сами, игра не застревает. `ANSWER_CLASSIFIER_ENABLED=0` — ворот нет.
+- Сервис недоступен — ворота остаются закрытыми (открывает только верный ответ), игроки видят сообщение «судья недоступен». `ANSWER_CLASSIFIER_ENABLED=0` — ворот нет.
 
 Проверка всего пути (бот: прыжок → вопрос → ворота держат → «Нет» → «Да» → проход):
 `npm run gate -w server` (с HTTPS-сервером: `NODE_TLS_REJECT_UNAUTHORIZED=0 SERVER_URL=https://127.0.0.1:2567 npm run gate -w server`).

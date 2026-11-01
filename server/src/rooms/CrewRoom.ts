@@ -447,13 +447,21 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     return gate && !this.state.gatesOpen.includes(this.level.id) ? gate : null;
   }
 
-  /** NPC у ворот задаёт свой вопрос (всем или одному). Нет сервиса — ворота открываются сами. */
+  /**
+   * NPC у ворот задаёт свой вопрос (всем или одному). Открывает ворота только верный ответ (gateAnswer):
+   * нет сервиса — ворота остаются закрытыми, игроки видят, что судья недоступен.
+   */
   private async askGateQuestion(target: CrewClient | null) {
     const gate = this.closedGate();
     if (!gate) return;
     const npc = (await gateNpcs())?.[gate.agent];
     if (this.disposing || this.closedGate() !== gate) return;
-    if (!npc) return this.openGate(gate, null, 'Ворота открыты: судья ответов (answer-classifier) недоступен');
+    if (!npc) {
+      const text = 'Ворота закрыты: судья ответов (answer-classifier) недоступен — запустите его и спросите снова';
+      if (target) target.send(ServerMsg.System, { text });
+      else this.broadcast(ServerMsg.System, { text });
+      return;
+    }
     this.sayTo(target, gate.agent, npc.question, 'script');
   }
 
