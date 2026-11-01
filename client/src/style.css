@@ -30,6 +30,8 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0d14; }
 #game { position: fixed; inset: 0; }
 #game canvas { display: block; }
+/* Тёплая виньетка «диорамы» — края кадра чуть темнее, взгляд в центр. */
+#game::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 58%, rgba(30, 15, 0, 0.32) 100%); }
 
 /* фокус-кольцо по дизайн-контракту: видим всегда, не удаляем */
 :focus-visible { outline: 2px solid var(--vk-blue); outline-offset: 2px; border-radius: var(--r-s); }

@@ -20,7 +20,9 @@ export const ClientMsg = {
   Emote: 'emote',
   /** Вопрос агенту (рассказчику или ХРОНОСу): «@Галилей …» в чате. */
   Ask: 'agent.ask',
-  // Зарезервировано: Grab: 'grab', Release: 'release', AgentAsk: 'agent.ask'
+  /** Игрок упирается в ящик и толкает его (шлётся ~10 Гц, пока толкает). */
+  Push: 'crate.push',
+  // Зарезервировано: Grab: 'grab', Release: 'release'
 } as const;
 
 export const ServerMsg = {
@@ -43,6 +45,11 @@ export const ServerMsg = {
   /** Лично игроку: начислен опыт. */
   Xp: 'xp',
 } as const;
+
+export interface PushPayload {
+  crateId: string;
+  dir: 1 | -1;
+}
 
 export interface InteractPayload {
   stationId: string;

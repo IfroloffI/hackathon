@@ -57,7 +57,7 @@ const BONUSES: ScenarioBonus[] = [
 function epochScenario(levelId: string, title: string, agent: string, narrator: string, puzzleStages: { goal: string; par: number }[], reachPar: number): ScenarioDef {
   const steps: ScenarioStep[] = [
     { id: 'briefing', title: 'Брифинг', goal: `Найдите и выслушайте: ${narrator}`, done: { kind: 'talked', agent }, parSeconds: 45, cue: `Сначала поговорите с местным: ${narrator}. Роли откроются после брифинга.` },
-    { id: 'reach', title: 'К местам ролей', goal: 'Доберитесь до кругов ролей и займите обе (E)', done: { kind: 'roles' }, parSeconds: reachPar, rolesOpen: true, cue: 'Роли открыты. Дорога к ним — не прогулка.' },
+    { id: 'reach', title: 'К местам ролей', goal: 'Доберитесь до кругов ролей и займите обе (E)', done: { kind: 'roles' }, parSeconds: reachPar, rolesOpen: true, cue: 'Роли открыты. Дорога к ним — полоса препятствий: ящики, ветер, стрелы. Держитесь вместе.' },
   ];
   puzzleStages.forEach((s, i) => {
     const last = i === puzzleStages.length - 1;
@@ -72,27 +72,27 @@ export const SCENARIOS: readonly ScenarioDef[] = [
     { goal: 'Механик: совместите дугу с тенью и зафиксируйте угол', par: 90 },
     { goal: 'Наблюдатель: вычислите окружность, Механик: наберите её на счётах', par: 120 },
     { goal: 'Наблюдатель: подтвердите число на счётах', par: 30 },
-  ], 90),
+  ], 270),
   epochScenario('padua', 'Фазы Венеры', 'galileo', 'Галилей', [
     { goal: 'Ночь 1: совместите модель с наблюдением', par: 90 },
     { goal: 'Ночь 2', par: 90 },
     { goal: 'Ночь 3 (берегитесь облаков)', par: 90 },
     { goal: 'Ночь 4', par: 90 },
     { goal: 'Бонус Галилея: сколько спутников у Юпитера?', par: 60 },
-  ], 120),
+  ], 300),
   epochScenario('woolsthorpe', 'Законы движения', 'newton', 'Ньютон', [
     { goal: 'Попадите в первую мишень (учитывайте ветер)', par: 120 },
     { goal: 'Мишень переставили — попадите снова', par: 120 },
-  ], 100),
+  ], 300),
   epochScenario('bletchley', 'Взлом Энигмы', 'turing', 'Тьюринг', [
     { goal: 'Перехват 1: найдите позицию WETTERBERICHT', par: 120 },
     { goal: 'Перехват 1: подберите роторы', par: 150 },
     { goal: 'Перехват 2: новая шифровка — найдите crib', par: 120 },
     { goal: 'Перехват 2: роторы', par: 150 },
-  ], 120),
+  ], 300),
   epochScenario('baikonur', 'Первый полёт', 'korolev', 'Королёв', [
     { goal: 'Соберите ракету и выведите корабль на орбиту', par: 240 },
-  ], 120),
+  ], 300),
 ];
 
 export function scenarioForLevel(levelId: string): ScenarioDef | undefined {

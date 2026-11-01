@@ -63,6 +63,16 @@ export const ScenarioState = schema(
 );
 export type ScenarioState = SchemaType<typeof ScenarioState>;
 
+/** Толкаемый ящик полосы препятствий: позицию считает только сервер (shared/src/mechanics.ts). */
+export const CrateState = schema(
+  {
+    x: t.number(),
+    y: t.number(),
+  },
+  'CrateState',
+);
+export type CrateState = SchemaType<typeof CrateState>;
+
 export const CrewState = schema(
   {
     crewName: t.string(),
@@ -80,6 +90,8 @@ export const CrewState = schema(
     coinsTaken: t.array('string'),
     /** ключ — sessionId клиента Colyseus */
     players: t.map(PlayerState),
+    /** Ящики текущего уровня, ключ — id ящика из Level.crates. */
+    crates: t.map(CrateState),
   },
   'CrewState',
 );

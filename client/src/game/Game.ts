@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   ClientMsg,
   EMOTES,
   type EmoteBroadcast,
+  type CratePos,
   type LikeBroadcast,
   MOVE_SEND_HZ,
   ServerMsg,
@@ -19,6 +21,9 @@ import { RemotePlayer } from './RemotePlayer.ts';
 
 /** Если сервер «поправил» нас сильнее этого — принимаем его позицию. */
 const CORRECTION_THRESHOLD = 3;
+/** Как часто, пока упираемся в ящик, напоминаем серверу «толкаю» (его срок — CRATE_PUSH_TTL_MS). */
+const PUSH_SEND_HZ = 10;
+const HAZARD_BUBBLE: Record<string, string> = { arrow: '💥', water: '💦' };
 
 /**
  * Игровая сцена комнаты: рендер текущего уровня (корабль или эпоха), локальный игрок,
@@ -34,6 +39,7 @@ export class Game {
   private remotes = new Map<string, RemotePlayer>();
   private local?: { ctrl: LocalController; view: Character; state: NetPlayer };
   private sendAcc = 0;
+  private pushAcc = 0;
   private lastSent = '';
   private raf = 0;
   private unbind: (() => void)[] = [];
@@ -50,6 +56,11 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.95;
+    // Мягкое «студийное» окружение: ткань и пластик получают объёмные блики, как в диораме под софтбоксом.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     container.append(this.renderer.domElement);
     addEventListener('resize', this.onResize);
     addEventListener('keydown', this.onKeyDown);
@@ -102,6 +113,7 @@ export class Game {
     this.local?.ctrl.dispose();
     this.local?.view.dispose();
     this.world?.dispose();
+    this.scene.environment?.dispose();
     this.prompt.hidden = true;
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -177,9 +189,16 @@ export class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = this.clock.elapsedTime;
 
+    const crates = this.cratePositions();
+    this.world?.setCrates(crates);
     if (this.local) {
       const { ctrl, view, state } = this.local;
+      ctrl.crates = crates;
       ctrl.update(dt);
+      const hazard = ctrl.takeHazard();
+      if (hazard) view.showBubble(HAZARD_BUBBLE[hazard], 1200);
+      this.sendPush(dt);
+      if (ctrl.level.id === this.worldLevelId) this.world?.setProgress(ctrl.x);
       if (Math.hypot(state.x - ctrl.x, state.y - ctrl.y) > CORRECTION_THRESHOLD) ctrl.teleport(state);
       if (state.skin && state.skin !== view.skinId) this.rebuildLocalView();
       this.local.view.setPose(ctrl.x, ctrl.y, ctrl.z, ctrl.facing, ctrl.anim, dt);
@@ -188,7 +207,7 @@ export class Game {
       this.updatePrompt(ctrl);
     }
     this.remotes.forEach((r) => r.update(dt));
-    this.world?.update(t, dt);
+    this.world?.update(t, dt, this.camera.position.x);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -220,6 +239,22 @@ export class Game {
     if (this.nearStation.kind === 'shop') return this.onShop?.();
     this.room.send(ClientMsg.Interact, { stationId: this.nearStation.id });
   };
+
+  /** Ящики текущего уровня из state (позиции считает сервер). */
+  private cratePositions(): CratePos[] {
+    const list: CratePos[] = [];
+    this.room.state.crates?.forEach((c, id) => list.push({ id: String(id), x: c.x, y: c.y }));
+    return list;
+  }
+
+  /** Пока упираемся в ящик — шлём «толкаю» ~10 Гц; сервер сам проверит, что мы рядом. */
+  private sendPush(dt: number) {
+    const push = this.local?.ctrl.pushing;
+    this.pushAcc += dt;
+    if (!push || this.pushAcc < 1 / PUSH_SEND_HZ) return;
+    this.pushAcc = 0;
+    this.room.send(ClientMsg.Push, push);
+  }
 
   /** Шлём позицию с частотой MOVE_SEND_HZ и только если она изменилась. */
   private sendMove(dt: number) {
