@@ -10,8 +10,8 @@ import { decorateHub } from './hub.ts';
 import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua, decorateWoolsthorpe } from './epochs.ts';
 
 export interface World {
-  /** focusX — где камера: за ней ходит солнце с тенями (уровни длинные). */
-  update(t: number, dt: number, focusX?: number): void;
+  /** focusX — где камера: за ней ходит солнце с тенями и объезжают задники; yaw — угол поворота камеры. */
+  update(t: number, dt: number, focusX?: number, yaw?: number): void;
   setParts(parts: string[]): void;
   /** Спрятать уже собранные сферы (при входе на уровень). */
   hideCoins(ids: Iterable<string>): void;
@@ -74,7 +74,7 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     if (s.kind !== 'narrator' || !s.agent || !NPC_LOOK[s.agent]) continue;
     const name = EPOCHS.find((e) => e.narrator.id === s.agent)?.narrator.name ?? s.agent;
     const npc = new Character(name, 0xffe066, { npc: NPC_LOOK[s.agent] });
-    npc.root.position.set(s.x, s.y, -0.9);
+    npc.root.position.set(s.x, s.y, (s.z ?? 0) - 0.9);
     g.add(npc.root);
     npcs.push(npc);
   }
@@ -99,8 +99,8 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
   });
 
   return {
-    update(t, dt, focusX = 0) {
-      decor.update?.(t);
+    update(t, dt, focusX = 0, yaw = 0) {
+      decor.update?.(t, focusX, yaw);
       gate?.update(dt);
       obstacles.update(t, mechClock(), dt);
       // Солнце (и его тени) едет за камерой с шагом, чтобы тени не «дрожали».

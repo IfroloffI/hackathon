@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { craft, cutout, glowing, hillsShape, mesh, polyShape, rnd, skyTexture, soft, stitchLine } from '../craft.ts';
-import { landedShip, stars, tint } from './common.ts';
+import { landedShip, starSphere, tint } from './common.ts';
 import { signSprite, type Decor } from './decor.ts';
 
 /**
@@ -39,11 +39,11 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
   g.add(rim);
 
   // Пол-стол до горизонта и кочки-кулисы переднего плана.
-  const floor = mesh(new THREE.PlaneGeometry(260, 80), craft('felt', tint(p.ground, 0.5)), 0, -1.6, -20);
+  const floor = mesh(new THREE.PlaneGeometry(340, 96), craft('felt', tint(p.ground, 0.5)), 0, -1.6, -20);
   floor.rotation.x = -Math.PI / 2;
   floor.castShadow = false;
   g.add(floor);
-  for (let x = -70; x <= 130; x += 4.6) {
+  for (let x = -84; x <= 148; x += 4.6) {
     const tuft = new THREE.Group();
     for (let k = 0; k < 3; k++) {
       const b = mesh(new THREE.SphereGeometry(0.7 + ((x * 7 + k) % 5) * 0.1, 20, 14), craft('felt', p.tuft), k * 0.7, 0, 0, false);
@@ -53,20 +53,33 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
     tuft.position.set(x + ((x * 13) % 3), -1.6, 4.4);
     g.add(tuft);
   }
-  g.add(cutout(hillsShape(4, 1.8, 0.08, 1, 130), p.hills[2], -34, 0.5));
-  g.add(cutout(hillsShape(2, 1.2, 0.13, 3, 130), p.hills[1], -22, 0.5));
-  g.add(cutout(hillsShape(0.4, 0.7, 0.2, 5, 130), p.hills[0], -12, 0.4));
-  if (p.night) g.add(stars(1200, 90, 0xfff6dc, 0.35));
+  g.add(cutout(hillsShape(4, 1.8, 0.08, 1, 170), p.hills[2], -34, 0.5));
+  g.add(cutout(hillsShape(2, 1.2, 0.13, 3, 170), p.hills[1], -22, 0.5));
+  g.add(cutout(hillsShape(0.4, 0.7, 0.2, 5, 170), p.hills[0], -12, 0.4));
+  // Небесный слой: солнце, луна, звёзды — объезжает за камерой, чтобы при разворотах не пустело.
+  const sky = new THREE.Group();
+  g.add(sky);
+  if (p.night) sky.add(starSphere(1100, 90, 0xfff6dc, 0.35));
   g.add(landedShip(-25));
   surroundings(g, p);
+  return sky;
+}
+
+/** Середина уровня: относительно неё небесные тела калибруются при постройке. */
+const SKY_PIVOT = 35;
+
+/** Небесный слой едет за камерой по уровню и слегка разворачивается навстречу её повороту. */
+function trackSky(sky: THREE.Group, focusX: number, yaw: number) {
+  sky.position.x = focusX;
+  sky.rotation.y = -yaw * 0.7;
 }
 
 /** Не ставим кулисы туда, где бегает игрок: дорожка уровня и её края (EPOCH_BOUNDS в shared). */
 const LANE_HALF = 3;
 const LEVEL_MIN_X = -31;
 const LEVEL_MAX_X = 101;
-/** Насколько окрестности тянутся по x — пол и холмы заканчиваются на ±130. */
-const SCATTER = { from: -70, to: 128 };
+/** Насколько окрестности тянутся по x — пол и холмы заканчиваются на ±170. */
+const SCATTER = { from: -84, to: 140 };
 
 /**
  * Окрестности диорамы — то, что открывается, когда камера поворачивается по ходу движения:
@@ -120,8 +133,8 @@ function surroundings(g: THREE.Group, p: Palette) {
   }
   // Кулисы за краями уровня: крупные холмы-подушки поперёк дорожки, чтобы конец мира не был пустым.
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 6; i++) {
-      const x = (side < 0 ? LEVEL_MIN_X : LEVEL_MAX_X) + side * (5 + i * 4 + rnd() * 3);
+    for (let i = 0; i < 7; i++) {
+      const x = (side < 0 ? LEVEL_MIN_X : LEVEL_MAX_X) + side * (6 + i * 6 + rnd() * 3);
       const z = -8 + rnd() * 18;
       const s = 2.2 + rnd() * 2;
       const hill = mesh(new THREE.SphereGeometry(s, 28, 18), craft('felt', p.hills[i % 3]), x, -1.6, z);
@@ -186,11 +199,11 @@ function house(w: number, h: number, wall: number, roof: number, windowGlow: num
 
 /** Сиена и Александрия: пустыня, пирамиды, обелиск, колоннада библиотеки, пальмы. */
 export function decorateAlexandria(g: THREE.Group, scene: THREE.Scene): Decor {
-  diorama(g, scene, {
+  const sky = diorama(g, scene, {
     sky: ['#ffe2a8', '#f7b46a'], ambient: 0xffd9a8, ground: 0xd59a55, tuft: 0xe8c48a,
     sun: { color: 0xfff0d0, intensity: 2.4, pos: [8, 18, 10] }, hills: [0xe0a862, 0xd99c5a, 0xc98a4c],
   });
-  disc(g, 0xfff3c0, 3, 12, 20, -60);
+    disc(sky, 0xfff3c0, 3, 12 - SKY_PIVOT, 20, -60);
   for (const [x, s] of [[-26, 9], [-4, 12], [40, 10], [70, 13], [104, 9]] as const) g.add(cutout(polyShape([[x - s, -1], [x, s * 0.9], [x + s, -1]]), 0xe9c07a, -28, 0.6, 'card'));
   const lib = new THREE.Group();
   for (let x = 84; x <= 93; x += 1.8) lib.add(mesh(new THREE.CylinderGeometry(0.3, 0.36, 7, 20), craft('card', 0xf6ead0), x, 3.5, -6));
@@ -203,17 +216,24 @@ export function decorateAlexandria(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(signSprite('СИЕНА', 35, 5, -2, 2.6, '#a8642a'));
   g.add(signSprite('АЛЕКСАНДРИЯ', 89, 8.4, -2, 3.6, '#a8642a'));
   g.add(signSprite('← 5000 стадий →', 62, 4.2, -3, 3.2, '#2bb5a8'));
-  return { update: clouds(g, 11) };
+  const cloudsDrift = clouds(g, 11);
+  return {
+    update(t, fx, yaw) {
+      cloudsDrift(t);
+      trackSky(sky, fx, yaw);
+    },
+  };
 }
 
 /** Падуя, ночь: дома с огнями, луна, яркая Венера, армиллярная сфера в мастерской, телескоп на крыше. */
 export function decoratePadua(g: THREE.Group, scene: THREE.Scene): Decor {
-  diorama(g, scene, {
+  const sky = diorama(g, scene, {
     sky: ['#2b3a7a', '#0e1433'], ambient: 0x5a5fb0, ground: 0x6a3a2e, tuft: 0x4a2f3a, night: true,
     sun: { color: 0xb8c8ff, intensity: 1.3, pos: [-6, 16, 10] }, hills: [0x3a2f5c, 0x2c2449, 0x211a38],
   });
-  disc(g, 0xfff6dc, 2.5, -28, 22, -70);
-  const venus = mesh(new THREE.SphereGeometry(0.6, 16, 12), glowing(0xfff6c8, 3), 30, 16, -60, false);
+    disc(sky, 0xfff6dc, 2.5, -28 - SKY_PIVOT, 22, -70);
+  const venus = mesh(new THREE.SphereGeometry(0.6, 16, 12), glowing(0xfff6c8, 3), 30 - SKY_PIVOT, 16, -60, false);
+  sky.add(venus);
   g.add(venus);
   for (let i = 0; i < 24; i++) {
     const x = -30 + i * 5.5;
@@ -243,20 +263,21 @@ export function decoratePadua(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(signSprite('ТЕЛЕСКОП', 93, 9.2, -2, 2.6, '#b5603f'));
   g.add(signSprite('ПЕРЕУЛОК СТРАЖИ', 6, 4.4, -2.6, 3.6, '#b5603f'));
   return {
-    update(t) {
+    update(t, fx, yaw) {
       rings.forEach((r, i) => (r.rotation.z = t * (0.3 + i * 0.2)));
       venus.scale.setScalar(1 + Math.sin(t * 3) * 0.1);
+      trackSky(sky, fx, yaw);
     },
   };
 }
 
 /** Англия, 1687: холмы, яблони, ферма, облака, поле с мишенью и забор. */
 export function decorateWoolsthorpe(g: THREE.Group, scene: THREE.Scene): Decor {
-  diorama(g, scene, {
+  const sky = diorama(g, scene, {
     sky: ['#dff3ff', '#9fd3f0'], ambient: 0xcfe8ff, ground: 0x6f9a45, tuft: 0x86b85a,
     sun: { color: 0xfffbe8, intensity: 2.4, pos: [10, 20, 10] }, hills: [0x8cc06a, 0x76ab58, 0x5f9447],
   });
-  disc(g, 0xfff3c0, 2.6, 14, 21, -60);
+    disc(sky, 0xfff3c0, 2.6, 14 - SKY_PIVOT, 21, -60);
   for (const [x, z, s] of [[-28, -9, 1.2], [16, -10, 1.4], [38, -8, 1], [62, -10, 1.3], [88, -9, 1.1]] as const) {
     const tree = new THREE.Group();
     tree.add(mesh(new THREE.CylinderGeometry(0.3, 0.5, 3, 12), craft('wood', 0x7a5232), 0, 1.5));
@@ -284,12 +305,18 @@ export function decorateWoolsthorpe(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(rail);
   g.add(signSprite('ПУШКА', 24, 7, -2, 2.2, '#4f7a3a'));
   g.add(signSprite('ПОЛЕ МИШЕНЕЙ', 70, 4.6, -2, 3.4, '#4f7a3a'));
-  return { update: clouds(g, 11) };
+  const cloudsDrift = clouds(g, 11);
+  return {
+    update(t, fx, yaw) {
+      cloudsDrift(t);
+      trackSky(sky, fx, yaw);
+    },
+  };
 }
 
 /** Блетчли-парк: пасмурно, особняк, радиомачта с маячком, «бомба» с барабанами-роторами на бараке. */
 export function decorateBletchley(g: THREE.Group, scene: THREE.Scene): Decor {
-  diorama(g, scene, {
+  const sky = diorama(g, scene, {
     sky: ['#c9d1cf', '#97a39f'], ambient: 0xb0bcb8, ground: 0x5d6a48, tuft: 0x74845a,
     sun: { color: 0xeef2f0, intensity: 1.7, pos: [-5, 18, 10] }, hills: [0x7a8a66, 0x6f5a4c, 0x5a4a40],
   });
@@ -323,20 +350,21 @@ export function decorateBletchley(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(signSprite('«БОМБА»', 88, 7, -2, 2.4, '#4a5a3a'));
   g.add(signSprite('ЛАБИРИНТ БАРАКОВ', 5.5, 4.8, -2.6, 3.6, '#4a5a3a'));
   return {
-    update(t) {
+    update(t, fx, yaw) {
       drums.forEach((d, i) => (d.rotation.y = t * (1 + (i % 6) * 0.3)));
       beacon.visible = Math.sin(t * 4) > 0;
+      trackSky(sky, fx, yaw);
     },
   };
 }
 
 /** Байконур, 1961: закат над степью, ракета у башни, бункер с перископом, баки в цеху. */
 export function decorateBaikonur(g: THREE.Group, scene: THREE.Scene): Decor {
-  diorama(g, scene, {
+  const sky = diorama(g, scene, {
     sky: ['#ffc59a', '#e8735a'], ambient: 0xffb08a, ground: 0xb07a48, tuft: 0xd9a46a,
     sun: { color: 0xffd2a8, intensity: 2.2, pos: [-12, 10, 10] }, hills: [0xd08a60, 0xb87452, 0x9a6046],
   });
-  disc(g, 0xfff0c0, 6, -36, 6, -80);
+    disc(sky, 0xfff0c0, 6, -36 - SKY_PIVOT, 6, -80);
   g.add(mesh(soft(5, 0.6, 4, 0.2), craft('card', 0x7f8c8d), 86, 0.3, -2.6));
   g.add(mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.4, 12), craft('metal', 0x444444), 31.5, 4.2, -2.2));
   g.add(mesh(soft(0.5, 0.26, 0.26, 0.08), craft('metal', 0x444444), 31.7, 4.9, -2.2));
@@ -356,9 +384,10 @@ export function decorateBaikonur(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(signSprite('ВОСТОК', 86, 11.8, -2.4, 2.4, '#e8382f'));
   const drift = clouds(g, 9, 13);
   return {
-    update(t) {
+    update(t, fx, yaw) {
       drift(t);
       lights.forEach((l, i) => (l.visible = Math.sin(t * 3 + i) > -0.2));
+      trackSky(sky, fx, yaw);
     },
   };
 }

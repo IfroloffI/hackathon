@@ -17,6 +17,15 @@ const HULL = 0x3d4a7a;
 const HULL_DARK = 0x2a3460;
 const TRIM = 0x6c8cff;
 
+/**
+ * Задник-«картина космоса» живёт прямо на линии взгляда камеры: едет за ней по уровню
+ * и разворачивается точно на её yaw, поэтому при любых поворотах края панно не открываются.
+ */
+function trackSpace(m: THREE.Mesh, focusX: number, yaw: number, depth: number) {
+  m.position.set(focusX + Math.sin(yaw) * depth, 5, -Math.cos(yaw) * depth);
+  m.rotation.y = -yaw;
+}
+
 /** Космос за иллюминаторами — одна «картина» за стеной: звёзды, планета с кольцом, оранжевая луна. */
 function spaceTexture(): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
@@ -148,9 +157,9 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(aiLight);
 
   // Космос и стена с иллюминаторами (дыры в форме стены).
-  // Картина космоса широкая: камера поворачивается по ходу движения, края не должны показываться.
+  // Панно-задник сразу стоит за пультом; каждый кадр оно объезжает за камерой (trackSpace в update).
   const space = new THREE.Mesh(new THREE.PlaneGeometry(220, 90), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
-  space.position.set(23, 5, -24);
+  space.position.set(23, 5, -26);
   g.add(space);
   g.add(starSphere(1500, 110, 0xfff6dc, 0.45));
   const planets = outerSpace(g);
@@ -249,8 +258,9 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   const gym = decorateGym(g);
 
   return {
-    update(t) {
-      gym(t);
+    update(t, fx, yaw) {
+      gym(t, fx, yaw);
+      trackSpace(space, fx, yaw, 26);
       core.rotation.set(t * 0.6, t, 0);
       core.position.y = 3.6 + Math.sin(t * 2) * 0.08;
       bands.forEach((b, i) => (b.scale.setScalar(1 + Math.sin(t * 3 + i) * 0.015)));
@@ -280,11 +290,11 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
  * Паркур-отсек за переборкой (x 16…62): тёмный трюм с фиолетовыми фермами, шахта вниз (упал — к флажку),
  * иллюминатор во всю стену и вывеска. Сами препятствия — из данных уровня (obstacles.ts).
  */
-function decorateGym(g: THREE.Group): (t: number) => void {
+function decorateGym(g: THREE.Group): (t: number, fx: number, yaw: number) => void {
   const GYM_HULL = 0x2f2856;
   const GYM_TRIM = 0x9b7bff;
-  const space = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
-  space.position.set(40, 5, -12);
+  const space = new THREE.Mesh(new THREE.PlaneGeometry(160, 70), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
+  space.position.set(40, 5, -20);
   g.add(space);
   const wall = roundRectShape(18.05, -6, 44.5, 18, 0.6);
   for (const x of [26, 40, 54]) wall.holes.push(roundRectShape(x - 4, 3, 8, 6, 2.6));
@@ -314,7 +324,8 @@ function decorateGym(g: THREE.Group): (t: number) => void {
   g.add(badge('ПАРКУР-ОТСЕК', 4.4, '#6a4bd0', 21, 4.4, -3.6));
   g.add(badge('ФИНИШ · +5 VK COIN', 4.4, '#c99a12', 59, 10.4, -3.6));
   g.add(badge('ПАРКУР →', 2.4, '#6a4bd0', 13.6, 3.4, -2.6));
-  return (t) => {
+  return (t, fx, yaw) => {
+    trackSpace(space, fx, yaw, 20);
     finish.intensity = 12 + Math.sin(t * 3) * 4;
   };
 }

@@ -12,7 +12,7 @@ import { inMoat } from './mechanics.ts';
  */
 const DT = 1 / 30;
 const MAX_FALL = 20;
-const LANES = [-1.1, 0, 1.1];
+const LANES = [1.1, 0, -1.1, -2.6, -4.2, -5.6];
 
 export interface Pose {
   x: number;
@@ -30,8 +30,7 @@ export interface Exploration {
 const key = (p: Pose) => `${Math.round(p.x / 0.3)}|${Math.round(p.y * 20)}|${Math.round(p.z * 10)}${p.bounce ? 'b' : ''}`;
 
 /** Симуляция одного действия до приземления. null — упал в яму. */
-function simulate(level: Level, start: Pose, act: { dir: number; holdDir: number; jump: boolean; vz?: number; laneTarget?: number }, coins: Set<string>): Pose | null {
-  const b: Body = { x: start.x, y: start.y, z: start.z, vx: 0, vy: 0, vz: 0 };
+function simulate(level: Level, start: Pose, act: { dir: number; holdDir: number; jump: boolean; vz?: number; laneTarget?: number }, coins: Set<string>): Pose | null {  const b: Body = { x: start.x, y: start.y, z: start.z, vx: 0, vy: 0, vz: 0 };
   let grounded = true;
   let left = false; // оторвались ли от опоры
   for (let t = 0; t < 4; t += DT) {

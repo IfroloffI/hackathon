@@ -56,6 +56,8 @@ export interface Station {
   x: number;
   /** Уровень пола у станции — чтобы нельзя было «нажать» станцию с платформы над ней. */
   y: number;
+  /** Глубина станции: как у пола дорожки (0) или в ветке вглубь (отрицательный z). */
+  z?: number;
   label: string;
   /** Для narrator — id агента (рассказчик эпохи или бортовой ИИ). */
   agent?: string;
@@ -67,8 +69,12 @@ export interface Station {
 
 export const STATION_RADIUS = 1.6;
 
-export function isNearStation(s: Station, p: { x: number; y: number }): boolean {
-  return Math.abs(p.x - s.x) <= STATION_RADIUS && Math.abs(p.y - s.y) <= 1.6;
+export function isNearStation(s: Station, p: { x: number; y: number; z?: number }): boolean {
+  return (
+    Math.abs(p.x - s.x) <= STATION_RADIUS &&
+    Math.abs(p.y - s.y) <= 1.6 &&
+    Math.abs((p.z ?? 0) - (s.z ?? 0)) <= STATION_RADIUS
+  );
 }
 
 /** Сфера VK Coin. id уникален на всю игру — собранная монета не возвращается до конца сессии. */
@@ -142,7 +148,13 @@ export function respawnPoint(level: Level, fellAtX: number): { x: number; y: num
   return best ? { x: best.x, y: best.y, z: 0 } : { ...level.spawn };
 }
 
-const LANE = { minZ: -1.5, maxZ: 1.5, minY: -5 };
+/**
+ * Дорожка ширины 3 (z −1.5…1.5, ширина не растёт); вглубь (до −6.5) — ветки-тропы,
+ * которые уровень открывает своими платформами с явными z/d.
+ */
+const LANE = { minZ: -6.5, maxZ: 1.5, minY: -5 };
+/** Глубина объектов дорожки: перекрывает всю полосу ±1.5 с запасом, но не строит стен в ветках. */
+const LANE_D = 3.2;
 /** Эпоха — длинная полоса: старт с кораблём слева, роль на полпути, вторая роль в конце (~5 минут на экипаж). */
 const EPOCH_BOUNDS = { minX: -30, maxX: 100, ...LANE };
 const EPOCH_SPAWN = { x: -21, y: 0, z: 0 };
@@ -150,16 +162,29 @@ const returnStation: Station = { id: 'return', kind: 'return', x: -24, y: 0, lab
 
 /** Кусок пола от x0 до x1 (верх y=0). Между кусками — ямы: упал — вернулся к чекпоинту. */
 const ground = (x0: number, x1: number, color: number): Platform => ({ x: (x0 + x1) / 2, y: -0.5, w: x1 - x0, h: 1, color, kind: 'floor' });
-/** Сплошной блок от пола до top (ступень, ящик, холм). */
-const block = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform => ({ x, y: top / 2, w, h: top, color, ...extra });
+/** Сплошной блок от пола до top (ступень, ящик, холм). Занимает дорожку, но не бесконечную глубину. */
+const block = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform =>
+  ({ x, y: top / 2, w, h: top, z: 0, d: LANE_D, color, ...extra });
 /** Блок от x0 до x1 высотой top — удобнее для крыш и стен. */
 const span = (x0: number, x1: number, top: number, color: number): Platform => block((x0 + x1) / 2, x1 - x0, top, color);
 /** Тонкая парящая платформа с верхом top. */
-const ledge = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform => ({ x, y: top - 0.15, w, h: 0.3, color, ...extra });
+const ledge = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform =>
+  ({ x, y: top - 0.15, w, h: 0.3, z: 0, d: LANE_D, color, ...extra });
 /** Платформа только в дальнем ряду: встать можно, лишь уйдя вглубь (W). */
-const backLedge = (x: number, w: number, top: number, color: number): Platform => ledge(x, w, top, color, { z: -1, d: 1 });
+const backLedge = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform =>
+  ledge(x, w, top, color, { z: -1, d: 1, ...extra });
 /** Бортик-укрытие от ветра на краю платформы: верх top+h. */
-const parapet = (x: number, top: number, color: number, h = 1): Platform => ({ x, y: top + h / 2, w: 0.6, h, color });
+const parapet = (x: number, top: number, color: number, h = 1): Platform =>
+  ({ x, y: top + h / 2, w: 0.6, h, z: 0, d: LANE_D, color });
+/** Ветка вглубь: пол-грунт на глубине z (центр), шириной d (по умолчанию 3 — как дорожка). */
+const backFloor = (x0: number, x1: number, top: number, z: number, color: number, d = 3): Platform =>
+  ({ x: (x0 + x1) / 2, y: top - 0.5, w: x1 - x0, h: 1, z, d, color, kind: 'floor' });
+/** Ступенька в ветке вглубь: парящая платформа с центром z. */
+const backStep = (x: number, w: number, top: number, z: number, color: number, d = 3): Platform =>
+  ({ x, y: top - 0.15, w, h: 0.3, z, d, color });
+/** Блок-укрытие/декорация в ветке вглубь. */
+const backBlock = (x: number, w: number, top: number, z: number, color: number, d = 3): Platform =>
+  block(x, w, top, color, { z, d });
 /** Высокая стена, перекрывающая часть глубины: обходится по W/S. side: 'front' — у камеры, 'back' — у фона. */
 const depthWall = (x: number, side: 'front' | 'back', color: number): Platform => ({
   x, y: 1.6, w: 0.5, h: 3.2, z: side === 'front' ? 0.65 : -0.65, d: 1.7, color, kind: 'wall', decor: true,
@@ -222,12 +247,14 @@ export const HUB_LEVEL: Level = {
     { id: 'gym_reset', kind: 'reset', x: 17.8, y: 0, label: 'Паркур-отсек: вернуть ящик', crates: ['gym'] },
     { id: 'gym_reward', kind: 'reward', x: 59.5, y: 7.2, label: 'Финиш паркура — забрать награду', reward: 5 },
   ],
-  coins: coins('hub', [[-10, 2.9], [-5.5, 4.9], [10.5, 2.9], [6.5, 1.8, 1], [27, 3.4], [35, 4.3], [42.5, 6.2], [54, 8.0]]),
+  coins: coins('hub', [[-10, 2.9], [-5.5, 4.9], [10.5, 2.9], [6.5, 1.8, 1], [27, 3.4], [35, 4.3], [42.5, 6.2], [54, 8.0], [-4, 0.8, -5.3], [0, 0.8, -5.3], [4, 0.8, -5.3], [8, 0.8, -5.3]]),
   checkpoints: [{ x: 17, y: 0 }, { x: 27.5, y: 2.6 }, { x: 41.5, y: 2.6 }],
   crates: [crate('gym', 19.5, [25.4, 0])],
   arrows: [{ x: 40.2, y: 3.75, dir: -1, range: 11, period: 2.2 }],
   fans: [{ x: 56, y: 7.2, dir: -1, len: 15, h: 3, period: 4.6, on: 2.2 }],
 };
+// Ветка вглубь на борту: держаться z < −1.5 — ENGINE (z −4.2…−1.0) открывает за собой коридор,
+// в нём «трюмные» монеты. Пол палубы тянется на всю глубину, так что ветка ходибельна сразу.
 
 // ───────────── Сиена и Александрия.
 // Ящик к скале → коридор стрел над двумя рвами → плато Сиены (Наблюдатель) → мостки под ветром с бортиками-укрытиями →
@@ -260,6 +287,12 @@ export const ALEXANDRIA_LEVEL: Level = {
     parapet(56.2, 2, 0xc49a5c),
     ground(59, 66, SAND),
     span(59, 60, 1, ROCK), // ступень назад, на мостки
+    // Ветка вглубь: обход мостков «низом» — тропа от Сиены вдоль пропасти к поселению.
+    backFloor(30, 39, 0, -4.2, SAND), // уходит за плато Сиены
+    backStep(42.2, 2.6, 1, -4.2, SAND),
+    backStep(46.6, 2.6, 1.2, -4.2, SAND),
+    backStep(51, 2.8, 1.6, -4.2, SAND),
+    backStep(55.4, 2.8, 2.2, -4.2, SAND),
     ...moat(66, 72.4, 0x2fb8d0, -0.35, -1.2), // ров: перепрыгнуть нельзя, ящик ложится на дно вровень с полом
     ground(72.4, 100, SAND),
     trampoline(78),
@@ -274,7 +307,7 @@ export const ALEXANDRIA_LEVEL: Level = {
     { id: 'reset2', kind: 'reset', x: 60.5, y: 0, label: 'Вернуть ящик у рва', crates: ['moat'] },
     { id: 'mechanic', kind: 'mechanic', x: 92, y: 5.2, label: 'Александрия, гномон — роль Механика' },
   ],
-  coins: coins('alexandria', [[-10.5, 1.6], [9, 3.8], [15.2, 1.4], [22.2, 1.4], [33, 3.0], [45.2, 3.9], [56.2, 3.9], [69.5, 1.4], [78, 5.6], [86, 6.0], [98, 0.8]]),
+  coins: coins('alexandria', [[-10.5, 1.6], [9, 3.8], [15.2, 1.4], [22.2, 1.4], [33, 3.0], [45.2, 3.9], [56.2, 3.9], [69.5, 1.4], [78, 5.6], [86, 6.0], [98, 0.8], [34, 0.9, -4.2], [42.2, 2.0, -4.2], [46.6, 2.3, -4.2], [51, 2.7, -4.2], [55.4, 3.3, -4.2]]),
   checkpoints: [{ x: -8, y: 0 }, { x: 11.5, y: 0 }, { x: 38.5, y: 2 }, { x: 60, y: 0 }, { x: 74, y: 0 }],
   crates: [crate('rock', 2, [7.4, 0]), crate('moat', 63, [66.9, -1.2])],
   arrows: [{ x: 29.8, y: 0.55, dir: -1, range: 17, period: 1.9 }],
@@ -318,6 +351,9 @@ export const PADUA_LEVEL: Level = {
     ...moat(80, 83, 0x2a6f8a),
     span(83, 100, 6.4, 0xb0623a), // крыша обсерватории
     { x: 93, y: 3.4, w: 10, h: 6.8, z: -2.4, d: 1.2, color: 0xd8c3a5, kind: 'hut', decor: true },
+    // Ветка вглубь: полочки в глубине канала — закуток с монетами (выход на дальний берег — только крышами).
+    backFloor(45.5, 49.5, 0, -4.4, STONE),
+    backFloor(51.5, 53.5, 0, -4.4, STONE),
   ],
   stations: [
     returnStation,
@@ -326,7 +362,7 @@ export const PADUA_LEVEL: Level = {
     { id: 'mechanic', kind: 'mechanic', x: 41.5, y: 2.8, label: 'Мастерская, модель — роль Механика' },
     { id: 'observer', kind: 'observer', x: 93, y: 6.4, label: 'Крыша, телескоп — роль Наблюдателя' },
   ],
-  coins: coins('padua', [[-10.5, 1.6], [1.5, 0.8, -1.1], [8.5, 0.8, -1.1], [19.5, 2.8], [30, 0.8], [49.5, 4.4], [63, 5.2], [69, 6.2], [77.5, 6.2], [87, 7.2], [98, 7.2]]),
+  coins: coins('padua', [[-10.5, 1.6], [1.5, 0.8, -1.1], [8.5, 0.8, -1.1], [19.5, 2.8], [30, 0.8], [49.5, 4.4], [63, 5.2], [69, 6.2], [77.5, 6.2], [87, 7.2], [98, 7.2], [47.5, 0.9, -4.4], [52.5, 0.9, -4.4]]),
   checkpoints: [{ x: -8, y: 0 }, { x: 21, y: 0 }, { x: 43, y: 2.8 }, { x: 61, y: 0 }, { x: 68, y: 5.4 }, { x: 85, y: 6.4 }],
   crates: [crate('bench', 24, [37.4, 0])],
   arrows: [
@@ -373,6 +409,9 @@ export const WOOLSTHORPE_LEVEL: Level = {
     trampoline(83),
     ledge(90, 10, 5.4, 0x6b4423), // вышка наблюдателя
     { x: 96, y: 2.7, w: 0.5, h: 5.4, z: -2.2, d: 0.5, color: 0x6b4423, kind: 'tree', decor: true },
+    // Ветка вглубь: дальний луг за копнами — укрытия и монеты (переправа через реку — только ящики).
+    backBlock(58, 1.6, 1.4, -4.4, HAY),
+    backBlock(64.5, 1.6, 1.4, -4.4, HAY),
   ],
   stations: [
     returnStation,
@@ -381,7 +420,7 @@ export const WOOLSTHORPE_LEVEL: Level = {
     { id: 'reset1', kind: 'reset', x: 33.5, y: 0, label: 'Вернуть ящики у реки', crates: ['raft1', 'raft2'] },
     { id: 'observer', kind: 'observer', x: 91, y: 5.4, label: 'Вышка у поля мишеней — роль Наблюдателя' },
   ],
-  coins: coins('woolsthorpe', [[-10, 1.2], [4.5, 4.4], [11, 5.4], [15.5, 5.6], [28, 5.4], [43.5, 1.4], [56.5, 0.8], [62.5, 0.8], [75.5, 2.4], [83, 5.8], [95, 6.4]]),
+  coins: coins('woolsthorpe', [[-10, 1.2], [4.5, 4.4], [11, 5.4], [15.5, 5.6], [28, 5.4], [43.5, 1.4], [56.5, 0.8], [62.5, 0.8], [75.5, 2.4], [83, 5.8], [95, 6.4], [58, 2.4, -4.4], [64.5, 2.4, -4.4], [88, 0.8, -4.4]]),
   checkpoints: [{ x: -7, y: 0 }, { x: 12, y: 4.4 }, { x: 33, y: 0 }, { x: 49, y: 0 }, { x: 70, y: 0 }],
   // Сначала дальний ящик (он ляжет первым), затем ближний съедет по нему и ляжет вторым.
   crates: [crate('raft2', 37.5, [40.7, -1.2]), crate('raft1', 35, [41.9, -1.2])],
@@ -422,6 +461,9 @@ export const BLETCHLEY_LEVEL: Level = {
     ...moat(66, 72.6, 0x3a5a6a, 0.4, 0),
     span(72.6, 100, 2.8, HALL), // зал «бомбы»
     { x: 88, y: 4.3, w: 7, h: 3, z: -2.4, d: 1, color: 0x8b8f7a, kind: 'hut', decor: true },
+    // Ветка вглубь: задний двор бараков и двор за «бомбой» — монеты в глубине (проём — только с ящиком).
+    backFloor(48.5, 65.2, 0, -4.4, PARK),
+    backFloor(74, 99, 0, -4.4, PARK),
   ],
   stations: [
     returnStation,
@@ -431,7 +473,7 @@ export const BLETCHLEY_LEVEL: Level = {
     { id: 'reset2', kind: 'reset', x: 59.5, y: 2.8, label: 'Вернуть большой ящик', crates: ['big'] },
     { id: 'mechanic', kind: 'mechanic', x: 88, y: 2.8, label: '«Бомба» — роль Механика' },
   ],
-  coins: coins('bletchley', [[-8.5, 1.6], [0.5, 0.8, 1.1], [5.5, 0.8, -1.1], [10.5, 0.8, 1.1], [22, 3.4, -1], [26, 5.0], [43.5, 5.6], [52, 6.6], [69.5, 3.8], [80, 3.6], [97, 3.6]]),
+  coins: coins('bletchley', [[-8.5, 1.6], [0.5, 0.8, 1.1], [5.5, 0.8, -1.1], [10.5, 0.8, 1.1], [22, 3.4, -1], [26, 5.0], [43.5, 5.6], [52, 6.6], [69.5, 3.8], [80, 3.6], [97, 3.6], [0.5, 0.8, -5.6], [8.5, 0.8, -5.6], [52, 0.8, -4.4], [58, 0.8, -4.4], [63, 0.8, -4.4], [85, 0.8, -4.4], [92, 0.8, -4.4]]),
   checkpoints: [{ x: -6.5, y: 0 }, { x: 16.5, y: 0 }, { x: 34.5, y: 0 }, { x: 58.6, y: 2.8 }, { x: 74, y: 2.8 }],
   crates: [crate('hut', 14.5, [23.4, 0]), crate('big', 62, [67.6, 0], 2.8, 2.8, 0x8a6a4a)],
   arrows: [{ x: 56.8, y: 5.4, dir: -1, range: 10, period: 1.8 }],
@@ -473,6 +515,13 @@ export const BAIKONUR_LEVEL: Level = {
     ground(78, 100, STEPPE),
     { x: 86, y: 5, w: 1.6, h: 10, z: -2.4, d: 1.6, color: 0xe8e8e8, kind: 'rocket', decor: true },
     { x: 83.6, y: 4, w: 0.8, h: 8, z: -2.4, d: 0.8, color: 0xc0392b, kind: 'tower', decor: true },
+    // Ветка вглубь: вторая тропа под лесами — грунт у котлована, расходящиеся маршрутом ступени мимо «выхлопа».
+    backFloor(35.5, 55, 0, -4.2, STEPPE),
+    backStep(58, 3, 0.6, -4.2, STEPPE),
+    backStep(62, 3, 0.8, -4.2, STEPPE),
+    backStep(67, 3.2, 0.6, -4.2, STEPPE),
+    backStep(71.5, 3.4, 0.8, -4.2, STEPPE),
+    backStep(75, 3.4, 1.2, -4.2, STEPPE),
   ],
   stations: [
     returnStation,
@@ -481,7 +530,7 @@ export const BAIKONUR_LEVEL: Level = {
     { id: 'observer', kind: 'observer', x: 30, y: 2.8, label: 'Бункер управления — роль Наблюдателя' },
     { id: 'mechanic', kind: 'mechanic', x: 75, y: 8, label: 'Монтажные леса — роль Механика' },
   ],
-  coins: coins('baikonur', [[-4.5, 1.6], [7, 2.2], [14, 3.6], [24, 3.6], [36, 3.4], [43, 5.4], [48.5, 8.6], [55, 10.2], [60.3, 10.2], [68, 9.0], [90, 0.8]]),
+  coins: coins('baikonur', [[-4.5, 1.6], [7, 2.2], [14, 3.6], [24, 3.6], [36, 3.4], [43, 5.4], [48.5, 8.6], [55, 10.2], [60.3, 10.2], [68, 9.0], [90, 0.8], [40, 0.8, -4.2], [50, 0.8, -4.2], [54, 0.8, -4.2], [58, 1.3, -4.2], [62, 1.5, -4.2], [67, 1.3, -4.2], [71.5, 1.5, -4.2], [88, 0.8, -4.4], [95, 0.8, -4.4]]),
   checkpoints: [{ x: -2.5, y: 0 }, { x: 32, y: 2.8 }, { x: 47.5, y: 4.6 }, { x: 53, y: 9.4 }],
   crates: [crate('shield', 3, [13.4, 0])],
   arrows: [
