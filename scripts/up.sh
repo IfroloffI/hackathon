@@ -13,9 +13,11 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-# Wi-Fi/Ethernet в приоритете, VPN/Docker-интерфейсы — нет (как в scripts/livekit.sh).
+# ZeroTier (zt0) — приоритетнее Wi-Fi: если сегмент команды поднят, команда сидит в нём
+# (веню-Wi-Fi часто режет P2P). Иначе Wi-Fi/Ethernet; VPN/Docker-интерфейсы — нет.
 detect_ip() {
   if [[ "$(uname -s)" == Darwin ]]; then
+    ipconfig getifaddr zt0 2>/dev/null && return
     for i in en0 en1 en2 en3; do
       ipconfig getifaddr "$i" 2>/dev/null && return
     done
@@ -25,7 +27,8 @@ detect_ip() {
     ip -4 -o addr show scope global 2>/dev/null \
       | awk '{
           name = $2; sub(/@.*/, "", name); split($4, a, "/");
-          if (name ~ /^(en|eth|wlan|wl)/) rank = 0;
+          if (name ~ /^zt/) rank = -1;
+          else if (name ~ /^(en|eth|wlan|wl)/) rank = 0;
           else if (name ~ /^(utun|tun|tap|docker|br-|veth|singbox|vboxnet|vmnet|bridge|llw|awdl)/) rank = 2;
           else rank = 1;
           print rank, a[1];
@@ -38,6 +41,9 @@ detect_ip() {
 
 export LIVEKIT_NODE_IP="${LIVEKIT_NODE_IP:-$(detect_ip)}"
 [[ -z "$LIVEKIT_NODE_IP" ]] && LIVEKIT_NODE_IP=127.0.0.1
+# Адрес, который игра рекламирует в invite-ссылках и UDP-маяке (/api/host, LAN_IP).
+# В контейнере game своих LAN-интерфейсов нет — передаём адрес хоста снаружи.
+export LAN_IP="${LAN_IP:-$LIVEKIT_NODE_IP}"
 
 CERT_DIR="$ROOT/livekit/certs"
 if [[ ! -f "$CERT_DIR/dev-cert.pem" || ! -f "$CERT_DIR/dev-key.pem" ]]; then
