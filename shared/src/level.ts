@@ -1,3 +1,5 @@
+import type { ArrowTrap, CrateDef, FanDef } from './mechanics.ts';
+
 /**
  * Описание уровней, общее для клиента (рендер + физика) и сервера (валидация, станции).
  * Позже переедет в levels/*.json — по эпохе на файл.
@@ -39,10 +41,12 @@ export interface Platform {
   kind?: PlatformLook;
   /** Твёрдая декорация, а не ступенька: не участвует в проверке «достижимости» прыжком. */
   decor?: true;
+  /** Не твёрдый (вода рва): физика сквозь него проходит, рисуется как обычно. */
+  ghost?: true;
 }
 
 /** Точка взаимодействия (клавиша E). Сервер проверяет, что игрок рядом. */
-export type StationKind = 'jump' | 'return' | 'observer' | 'mechanic' | 'narrator' | 'shop';
+export type StationKind = 'jump' | 'return' | 'observer' | 'mechanic' | 'narrator' | 'shop' | 'reward' | 'reset';
 
 export interface Station {
   id: string;
@@ -53,6 +57,10 @@ export interface Station {
   label: string;
   /** Для narrator — id агента (рассказчик эпохи или бортовой ИИ). */
   agent?: string;
+  /** reward — сколько VK Coin получает каждый игрок (один раз за сессию). */
+  reward?: number;
+  /** reset — какие ящики вернуть на место (если завели их в тупик). */
+  crates?: string[];
 }
 
 export const STATION_RADIUS = 1.6;
@@ -80,6 +88,10 @@ export interface Level {
   coins: Coin[];
   /** Куда возвращает после падения в яму: ближайшая точка слева от места падения (иначе spawn). */
   checkpoints: { x: number; y: number }[];
+  /** Полоса препятствий (shared/src/mechanics.ts): толкаемые ящики, вентиляторы, ловушки со стрелами. */
+  crates?: CrateDef[];
+  fans?: FanDef[];
+  arrows?: ArrowTrap[];
 }
 
 export const COIN_PICKUP_RADIUS = 0.9;
@@ -98,7 +110,8 @@ export function respawnPoint(level: Level, fellAtX: number): { x: number; y: num
 }
 
 const LANE = { minZ: -1.5, maxZ: 1.5, minY: -5 };
-const EPOCH_BOUNDS = { minX: -30, maxX: 30, ...LANE };
+/** Эпоха — длинная полоса: старт с кораблём слева, роль на полпути, вторая роль в конце (~5 минут на экипаж). */
+const EPOCH_BOUNDS = { minX: -30, maxX: 100, ...LANE };
 const EPOCH_SPAWN = { x: -21, y: 0, z: 0 };
 const returnStation: Station = { id: 'return', kind: 'return', x: -24, y: 0, label: 'Колизиум: вернуться на борт' };
 
@@ -106,26 +119,43 @@ const returnStation: Station = { id: 'return', kind: 'return', x: -24, y: 0, lab
 const ground = (x0: number, x1: number, color: number): Platform => ({ x: (x0 + x1) / 2, y: -0.5, w: x1 - x0, h: 1, color, kind: 'floor' });
 /** Сплошной блок от пола до top (ступень, ящик, холм). */
 const block = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform => ({ x, y: top / 2, w, h: top, color, ...extra });
+/** Блок от x0 до x1 высотой top — удобнее для крыш и стен. */
+const span = (x0: number, x1: number, top: number, color: number): Platform => block((x0 + x1) / 2, x1 - x0, top, color);
 /** Тонкая парящая платформа с верхом top. */
 const ledge = (x: number, w: number, top: number, color: number, extra: Partial<Platform> = {}): Platform => ({ x, y: top - 0.15, w, h: 0.3, color, ...extra });
 /** Платформа только в дальнем ряду: встать можно, лишь уйдя вглубь (W). */
 const backLedge = (x: number, w: number, top: number, color: number): Platform => ledge(x, w, top, color, { z: -1, d: 1 });
+/** Бортик-укрытие от ветра на краю платформы: верх top+h. */
+const parapet = (x: number, top: number, color: number, h = 1): Platform => ({ x, y: top + h / 2, w: 0.6, h, color });
 /** Высокая стена, перекрывающая часть глубины: обходится по W/S. side: 'front' — у камеры, 'back' — у фона. */
 const depthWall = (x: number, side: 'front' | 'back', color: number): Platform => ({
   x, y: 1.6, w: 0.5, h: 3.2, z: side === 'front' ? 0.65 : -0.65, d: 1.7, color, kind: 'wall', decor: true,
 });
+/** Батут на опоре base (верх батута — base+1): подбрасывает на ~5. */
+const trampoline = (x: number, base = 0): Platform => ({ x, y: base + 0.5, w: 1.8, h: 1, z: 0, d: 1.8, color: 0xff4fa3, kind: 'trampoline' });
+/** Ров от x0 до x1: вода (не твёрдая, окунулся — к чекпоинту), под ней дно на глубине floor (для ящиков). */
+const moat = (x0: number, x1: number, color = 0x2fb8d0, top = -0.35, floor?: number): Platform[] => [
+  { x: (x0 + x1) / 2, y: top - 0.1, w: x1 - x0, h: 0.2, color, kind: 'moat', ghost: true, decor: true },
+  ...(floor === undefined ? [] : [{ x: (x0 + x1) / 2, y: floor - 0.5, w: x1 - x0, h: 1, color: 0x4a5a6a, decor: true } as Platform]),
+];
+const crate = (id: string, x: number, solve: [number, number], y = 0, s = 1.2, color?: number): CrateDef => ({ id, x, y, s, solve: { x: solve[0], y: solve[1] }, ...(color === undefined ? {} : { color }) });
 const coins = (levelId: string, list: [number, number, number?][]): Coin[] =>
   list.map(([x, y, z], i) => ({ id: `${levelId}-${i + 1}`, x, y, ...(z === undefined ? {} : { z }) }));
 
+// ───────────── Борт: палуба + паркур-отсек справа (за дверью в переборке). Награда в конце — VK Coin каждому.
+const DECK = 0x4a5a9a;
+const GYM = 0x5a4a8a;
 export const HUB_LEVEL: Level = {
   id: 'hub',
   title: 'Колизиум — борт корабля',
-  bounds: { minX: -15, maxX: 15, ...LANE },
+  bounds: { minX: -15, maxX: 62, ...LANE },
   spawn: { x: -4, y: 0, z: 0 },
   platforms: [
-    { ...ground(-16, 16, 0x4a5a9a) },
+    { ...ground(-16, 28, DECK) },
     { x: -15.6, y: 4, w: 1.2, h: 9, color: 0x2a3460, kind: 'wall', decor: true },
-    { x: 15.6, y: 4, w: 1.2, h: 9, color: 0x2a3460, kind: 'wall', decor: true },
+    // Переборка с проёмом в паркур-отсек: под ней проходят (низ на 3).
+    { x: 15.6, y: 6, w: 1.2, h: 6, color: 0x2a3460, kind: 'wall', decor: true },
+    { x: 62.6, y: 4, w: 1.2, h: 9, color: 0x2a3460, kind: 'wall', decor: true },
     // Мостки: каждая ступень не выше ~2.1 от предыдущей, под ними проходит голова (1.2).
     ledge(-10, 5, 2.1, 0x6c8cff),
     ledge(-5.5, 2.5, 4.1, 0x6c8cff),
@@ -137,85 +167,150 @@ export const HUB_LEVEL: Level = {
     { x: 12.5, y: 0.6, w: 2.4, h: 1.2, z: -2.2, d: 1.2, color: 0x4a5590, kind: 'console' },
     { x: 4, y: 0.5, w: 1.2, h: 1, z: -2.2, d: 1, color: 0x4a5590, kind: 'console' },
     { x: -12.5, y: 0.6, w: 1.6, h: 1.2, z: -2.2, d: 1.2, color: 0x0077ff, kind: 'console' }, // терминал магазина
+    // ── Паркур-отсек. 1) ящик к стенке 2.6;
+    span(26, 28, 2.6, GYM),
+    // 2) мостки над шахтой под обстрелом (стрелы на высоте груди);
+    ledge(31, 2, 3, GYM),
+    ledge(35, 2, 3.4, GYM),
+    ledge(39, 2, 3, GYM),
+    // 3) батут на нижней площадке → верхний ярус;
+    ledge(42.5, 3, 2.6, GYM),
+    trampoline(42.5, 2.6),
+    // 4) верхний ярус под порывами вентилятора — финишная площадка с наградой.
+    ledge(48.5, 4, 7.2, GYM),
+    parapet(50.2, 7.2, GYM),
+    ledge(54, 2.4, 7.2, GYM),
+    ledge(59, 6, 7.2, 0x6c8cff),
   ],
   stations: [
     { id: 'jump', kind: 'jump', x: 4, y: 0, label: 'Рычаг прыжка' },
     { id: 'ship_ai', kind: 'narrator', x: 12.5, y: 0, label: 'Поговорить с ХРОНОСом', agent: 'ship_ai' },
     { id: 'shop', kind: 'shop', x: -12.5, y: 0, label: 'Магазин скинов (VK Coin)' },
+    { id: 'gym_reset', kind: 'reset', x: 17.8, y: 0, label: 'Паркур-отсек: вернуть ящик', crates: ['gym'] },
+    { id: 'gym_reward', kind: 'reward', x: 59.5, y: 7.2, label: 'Финиш паркура — забрать награду', reward: 5 },
   ],
-  coins: coins('hub', [[-10, 2.9], [-5.5, 4.9], [10.5, 2.9], [6.5, 1.8, 1]]),
-  checkpoints: [],
+  coins: coins('hub', [[-10, 2.9], [-5.5, 4.9], [10.5, 2.9], [6.5, 1.8, 1], [27, 3.4], [35, 4.3], [42.5, 6.2], [54, 8.0]]),
+  checkpoints: [{ x: 17, y: 0 }, { x: 27.5, y: 2.6 }, { x: 41.5, y: 2.6 }],
+  crates: [crate('gym', 19.5, [25.4, 0])],
+  arrows: [{ x: 40.2, y: 3.75, dir: -1, range: 11, period: 2.2 }],
+  fans: [{ x: 56, y: 7.2, dir: -1, len: 15, h: 3, period: 4.6, on: 2.2 }],
 };
 
-// ───────────── Сиена и Александрия: обучение. Ямы, плато колодца, лестница храма с уступом вглубь.
+// ───────────── Сиена и Александрия.
+// Ящик к скале → коридор стрел над двумя рвами → плато Сиены (Наблюдатель) → мостки под ветром с бортиками-укрытиями →
+// ящик в ров вместо моста → батут под порывами на площадку гномона (Механик).
 const SAND = 0xd9b77e;
+const ROCK = 0xcfa96a;
 export const ALEXANDRIA_LEVEL: Level = {
   id: 'alexandria',
   title: 'Сиена и Александрия, ~240 до н. э.',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
   platforms: [
-    ground(-30, -13, SAND),
-    ground(-10.5, 3, SAND),
-    ground(6, 30, SAND),
-    block(-8.5, 1.4, 1.4, 0xcfa96a), // камень у плато
-    block(-5, 4, 2.8, 0xc49a5c), // плато Сиены с колодцем, верх 2.8 — с пола не допрыгнуть
-    block(-1.9, 1.2, 1.4, 0xcfa96a), // камень с обратной стороны — чтобы вернуться к кораблю
-    { x: -4.2, y: 3.2, w: 1.6, h: 0.8, z: -2.2, d: 1.6, color: 0x9b8466, kind: 'well', decor: true },
-    // Храм Александрии: ступени → уступ только в дальнем ряду → площадка гномона.
-    block(9, 2, 1, 0xe0cfa0),
-    block(11.5, 2, 2.2, 0xe0cfa0),
-    backLedge(14, 2, 3.6, 0xd8c08a),
-    ledge(17.2, 3, 4.6, 0xe8d8b0),
-    { x: 21, y: 3, w: 1, h: 6, z: -2.4, d: 1, color: 0xe8d8b0, kind: 'obelisk', decor: true },
+    ground(-30, -12, SAND),
+    ground(-9, 14, SAND),
+    span(8, 10, 2.8, ROCK), // скала: с пола не запрыгнуть — нужен ящик
+    span(10, 11, 1.4, 0xc49a5c), // уступ с обратной стороны — чтобы вернуться к кораблю
+    ...moat(14, 16.5),
+    ground(16.5, 21, SAND),
+    ...moat(21, 23.5),
+    ground(23.5, 30, SAND),
+    span(30, 40, 2, 0xc49a5c), // плато Сиены с колодцем
+    { x: 36.8, y: 2.4, w: 1.6, h: 0.8, z: -2.2, d: 1.6, color: 0x9b8466, kind: 'well', decor: true },
+    // Мостки над пропастью: бортики — укрытие от ветра.
+    ledge(44, 3, 2, ROCK),
+    parapet(45.2, 2, 0xc49a5c),
+    ledge(49.5, 3, 2, ROCK),
+    parapet(50.7, 2, 0xc49a5c),
+    ledge(55, 3, 2, ROCK),
+    parapet(56.2, 2, 0xc49a5c),
+    ground(59, 66, SAND),
+    span(59, 60, 1, ROCK), // ступень назад, на мостки
+    ...moat(66, 72.4, 0x2fb8d0, -0.35, -1.2), // ров: перепрыгнуть нельзя, ящик ложится на дно вровень с полом
+    ground(72.4, 100, SAND),
+    trampoline(78),
+    ledge(89, 14, 5.2, 0xe8d8b0), // площадка гномона
+    { x: 98, y: 3, w: 1, h: 6, z: -2.4, d: 1, color: 0xe8d8b0, kind: 'obelisk', decor: true },
   ],
   stations: [
     returnStation,
     { id: 'narrator', kind: 'narrator', x: -17, y: 0, label: 'Поговорить с Эратосфеном', agent: 'eratosthenes' },
-    { id: 'observer', kind: 'observer', x: -5, y: 2.8, label: 'Сиена, колодец — роль Наблюдателя' },
-    { id: 'mechanic', kind: 'mechanic', x: 17.2, y: 4.6, label: 'Александрия, гномон — роль Механика' },
+    { id: 'reset1', kind: 'reset', x: -6, y: 0, label: 'Вернуть ящик у скалы', crates: ['rock'] },
+    { id: 'observer', kind: 'observer', x: 35.5, y: 2, label: 'Сиена, колодец — роль Наблюдателя' },
+    { id: 'reset2', kind: 'reset', x: 60.5, y: 0, label: 'Вернуть ящик у рва', crates: ['moat'] },
+    { id: 'mechanic', kind: 'mechanic', x: 92, y: 5.2, label: 'Александрия, гномон — роль Механика' },
   ],
-  coins: coins('alexandria', [[-11.75, 1.6], [-8.5, 2.2], [-3.5, 3.6], [4.5, 1.8], [11.5, 3.0], [14, 4.4, -1], [17.2, 6.0], [27, 0.8]]),
-  checkpoints: [{ x: -9.8, y: 0 }, { x: 6.8, y: 0 }],
+  coins: coins('alexandria', [[-10.5, 1.6], [9, 3.8], [15.2, 1.4], [22.2, 1.4], [33, 3.0], [45.2, 3.9], [56.2, 3.9], [69.5, 1.4], [78, 5.6], [86, 6.0], [98, 0.8]]),
+  checkpoints: [{ x: -8, y: 0 }, { x: 11.5, y: 0 }, { x: 38.5, y: 2 }, { x: 60, y: 0 }, { x: 74, y: 0 }],
+  crates: [crate('rock', 2, [7.4, 0]), crate('moat', 63, [66.9, -1.2])],
+  arrows: [{ x: 29.8, y: 0.55, dir: -1, range: 17, period: 1.9 }],
+  fans: [
+    { x: 59, y: 1.4, dir: -1, len: 18.5, h: 4.4, period: 5.4, on: 3 },
+    { x: 83, y: 1, dir: -1, len: 9, h: 6, period: 5, on: 2.4, phase: 1 },
+  ],
 };
 
-// ───────────── Падуя: мастерская за стенами (перелезть по ящикам), балконы до крыши, один — только вглубь.
+// ───────────── Падуя, ночь.
+// Переулок стражи: арбалеты бьют по ближним рядам, укрытие — дальний ряд, но его перегораживают стены →
+// мастерская: сквозняк мехов по полу, ящик — щит и ступенька (Механик на верстаке) →
+// крыши над каналами: батут, порывы из труб и арбалет у обсерватории (Наблюдатель).
 const STONE = 0x9a6a4a;
+const ROOF = 0xa0522d;
 export const PADUA_LEVEL: Level = {
   id: 'padua',
   title: 'Падуя, 1610',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
   platforms: [
-    ground(-30, -14, STONE),
-    ground(-11, 30, STONE),
-    // Мастерская: стены 2.8 с ящиками снаружи и изнутри.
-    block(-9.6, 1.2, 1.2, 0x8a6a4a),
-    block(-7, 0.6, 2.8, 0x8a4a32),
-    block(-5.4, 0.8, 1.2, 0x8a6a4a),
-    { x: -4, y: 0.5, w: 2.4, h: 1, z: -2.2, d: 1.4, color: 0x8a5a3b, kind: 'table', decor: true },
-    block(-2.6, 0.8, 1.2, 0x8a6a4a),
-    block(-1.5, 0.6, 2.8, 0x8a4a32),
-    block(0.2, 1, 1.2, 0x8a6a4a),
-    // Путь на крышу: балкон → балкон вглубь → карниз → крыша.
-    block(4, 2, 1.4, 0x9a7b5f),
-    backLedge(7, 1.6, 2.8, 0x9a7b5f),
-    ledge(10, 1.6, 4.2, 0x9a7b5f),
-    ledge(16.5, 7, 5.6, 0xa0522d),
-    { x: 16.5, y: 2.6, w: 7, h: 5.2, z: -2.4, d: 1.2, color: 0xd8c3a5, kind: 'hut', decor: true },
+    ground(-30, -12, STONE),
+    ...moat(-12, -9, 0x2a6f8a),
+    ground(-9, 44, STONE),
+    depthWall(-2, 'back', 0x7a4a32),
+    depthWall(5, 'back', 0x7a4a32),
+    depthWall(12, 'back', 0x7a4a32),
+    span(19, 20, 2, 0x8a4a32), // будка арбалетчика
+    span(38, 44, 2.8, 0x8a5a3b), // верстак мастерской
+    { x: 41.5, y: 3.3, w: 2.4, h: 1, z: -2.2, d: 1.4, color: 0x8a5a3b, kind: 'table', decor: true },
+    // Крыши над каналами.
+    ...moat(44, 56, 0x2a6f8a),
+    span(47, 52, 3.6, ROOF),
+    span(56, 60, 3, ROOF),
+    ground(60, 66, STONE),
+    trampoline(63),
+    span(66, 72, 5.4, ROOF),
+    ...moat(72, 75, 0x2a6f8a),
+    span(75, 80, 5.4, ROOF),
+    ...moat(80, 83, 0x2a6f8a),
+    span(83, 100, 6.4, 0xb0623a), // крыша обсерватории
+    { x: 93, y: 3.4, w: 10, h: 6.8, z: -2.4, d: 1.2, color: 0xd8c3a5, kind: 'hut', decor: true },
   ],
   stations: [
     returnStation,
     { id: 'narrator', kind: 'narrator', x: -18, y: 0, label: 'Поговорить с Галилеем', agent: 'galileo' },
-    { id: 'mechanic', kind: 'mechanic', x: -4, y: 0, label: 'Мастерская, модель — роль Механика' },
-    { id: 'observer', kind: 'observer', x: 18, y: 5.6, label: 'Крыша, телескоп — роль Наблюдателя' },
+    { id: 'reset1', kind: 'reset', x: 22.5, y: 0, label: 'Вернуть ящик мастерской', crates: ['bench'] },
+    { id: 'mechanic', kind: 'mechanic', x: 41.5, y: 2.8, label: 'Мастерская, модель — роль Механика' },
+    { id: 'observer', kind: 'observer', x: 93, y: 6.4, label: 'Крыша, телескоп — роль Наблюдателя' },
   ],
-  coins: coins('padua', [[-12.5, 1.6], [-9.6, 2.0], [-7, 3.8], [-4, 1.0], [7, 3.6, -1], [10, 5.0], [14, 6.4], [27, 0.8]]),
-  checkpoints: [{ x: -10.5, y: 0 }],
+  coins: coins('padua', [[-10.5, 1.6], [1.5, 0.8, -1.1], [8.5, 0.8, -1.1], [19.5, 2.8], [30, 0.8], [49.5, 4.4], [63, 5.2], [69, 6.2], [77.5, 6.2], [87, 7.2], [98, 7.2]]),
+  checkpoints: [{ x: -8, y: 0 }, { x: 21, y: 0 }, { x: 43, y: 2.8 }, { x: 61, y: 0 }, { x: 68, y: 5.4 }, { x: 85, y: 6.4 }],
+  crates: [crate('bench', 24, [37.4, 0])],
+  arrows: [
+    // Арбалет бьёт по ближнему и среднему рядам; дальний (W) — укрытие, если не мешают стены.
+    { x: 18.8, y: 0.7, dir: -1, range: 27, z: 0.45, d: 2.1, period: 1.7 },
+    { x: 82.8, y: 6.05, dir: -1, range: 9, period: 2.4, phase: 0.6 },
+  ],
+  fans: [
+    { x: 38, y: 0, dir: -1, len: 14, h: 1.2 }, // мехи: дуют всегда, укрыться можно только за ящиком
+    { x: 86, y: 5.4, dir: -1, len: 15, h: 2.6, period: 4.4, on: 2 },
+  ],
 };
 
-// ───────────── Англия: река по камню, холм с пушкой ярусами, забор и вышка над полем мишеней.
+// ───────────── Англия, 1687.
+// Река по камню → батут-стог на холм под обстрелом → пушечный холм (Механик) → река пошире: два ящика на дно →
+// поле под порывами с копнами-укрытиями → стрельбище (стрелы летят в мишень, вдогонку) → батут на вышку (Наблюдатель).
 const GRASS = 0x6f9a52;
+const HILL = 0x5d8743;
+const HAY = 0xd9c36a;
 export const WOOLSTHORPE_LEVEL: Level = {
   id: 'woolsthorpe',
   title: 'Англия, 1687',
@@ -223,63 +318,101 @@ export const WOOLSTHORPE_LEVEL: Level = {
   spawn: EPOCH_SPAWN,
   platforms: [
     ground(-30, -12.5, GRASS),
+    ...moat(-12.5, -7.5, 0x3fa0d0),
     { x: -10, y: -2, w: 1, h: 4, color: 0x8a8a8a }, // камень посреди реки, верх 0
-    ground(-7.5, 30, GRASS),
-    block(-4.5, 3, 1.2, 0x5d8743),
-    block(-1.5, 3, 2.6, 0x5d8743),
-    block(2, 4, 4, 0x4f7a3a),
-    block(5.2, 1.2, 2.6, 0x5d8743), // спуск/подъём с правой стороны холма
-    block(6.6, 1.2, 1.3, 0x5d8743),
-    { x: 2.5, y: 4.4, w: 1.6, h: 0.8, z: -2.2, d: 1, color: 0x3d3d3d, kind: 'cannon', decor: true },
-    block(10, 1.6, 1.4, 0xd9c36a), // стог
-    { ...block(12, 0.4, 3.2, 0x8b6a3e), decor: true }, // забор
-    block(14, 1.6, 1.4, 0xd9c36a),
-    block(19.5, 1.2, 1.4, 0x8b6a3e),
-    block(22, 2, 3, 0x6b4423), // вышка наблюдателя
-    { x: -16, y: 1.5, w: 0.6, h: 3, z: -2.4, d: 0.6, color: 0x6b4423, kind: 'tree', decor: true },
+    ground(-7.5, 14, GRASS),
+    trampoline(4.5),
+    span(8, 14, 4.4, HILL),
+    ground(17, 40, GRASS),
+    span(17, 30, 4.4, 0x4f7a3a), // пушечный холм
+    { x: 25, y: 4.8, w: 1.6, h: 0.8, z: -2.2, d: 1, color: 0x3d3d3d, kind: 'cannon', decor: true },
+    span(30, 32, 2.2, HILL), // спуск с холма (и подъём обратно)
+    ...moat(40, 47.6, 0x3fa0d0, -0.35, -1.2),
+    ground(47.6, 100, GRASS),
+    // Копны — укрытия от порывов.
+    span(53, 54.6, 1.4, HAY),
+    span(59, 60.6, 1.4, HAY),
+    span(65, 66.6, 1.4, HAY),
+    span(75, 76, 1.4, 0x8b6a3e), // столб стрельбища с самострелом
+    trampoline(83),
+    ledge(90, 10, 5.4, 0x6b4423), // вышка наблюдателя
+    { x: 96, y: 2.7, w: 0.5, h: 5.4, z: -2.2, d: 0.5, color: 0x6b4423, kind: 'tree', decor: true },
   ],
   stations: [
     returnStation,
     { id: 'narrator', kind: 'narrator', x: -15, y: 0, label: 'Поговорить с Ньютоном', agent: 'newton' },
-    { id: 'mechanic', kind: 'mechanic', x: 2, y: 4, label: 'Пушка на холме — роль Механика' },
-    { id: 'observer', kind: 'observer', x: 22, y: 3, label: 'Вышка у поля мишеней — роль Наблюдателя' },
+    { id: 'mechanic', kind: 'mechanic', x: 24, y: 4.4, label: 'Пушка на холме — роль Механика' },
+    { id: 'reset1', kind: 'reset', x: 33.5, y: 0, label: 'Вернуть ящики у реки', crates: ['raft1', 'raft2'] },
+    { id: 'observer', kind: 'observer', x: 91, y: 5.4, label: 'Вышка у поля мишеней — роль Наблюдателя' },
   ],
-  coins: coins('woolsthorpe', [[-24, 2.2], [-10, 1.2], [-8.5, 1.4], [-1.5, 3.4], [2, 5.6], [12, 4.0], [14, 2.2], [22, 4.4]]),
-  checkpoints: [{ x: -7, y: 0 }, { x: 15, y: 0 }],
+  coins: coins('woolsthorpe', [[-10, 1.2], [4.5, 4.4], [11, 5.4], [15.5, 5.6], [28, 5.4], [43.5, 1.4], [56.5, 0.8], [62.5, 0.8], [75.5, 2.4], [83, 5.8], [95, 6.4]]),
+  checkpoints: [{ x: -7, y: 0 }, { x: 12, y: 4.4 }, { x: 33, y: 0 }, { x: 49, y: 0 }, { x: 70, y: 0 }],
+  // Сначала дальний ящик (он ляжет первым), затем ближний съедет по нему и ляжет вторым.
+  crates: [crate('raft2', 37.5, [40.7, -1.2]), crate('raft1', 35, [41.9, -1.2])],
+  arrows: [
+    { x: 7.8, y: 3, dir: -1, range: 8, period: 2 }, // пугало-самострел на склоне: бьёт по взлетающим с батута
+    { x: 76.2, y: 0.6, dir: 1, range: 20, period: 1.6 }, // стрельбище: стрелы летят вдогонку
+  ],
+  fans: [{ x: 72, y: 0, dir: -1, len: 23, h: 3, period: 5, on: 2.6 }],
 };
 
-// ───────────── Блетчли-парк: крыша радиорубки по ящикам и уступу вглубь, лабиринт стен перед «бомбой».
+// ───────────── Блетчли-парк, 1941.
+// Лабиринт бараков: вентиляторы дуют то в дальнем, то в ближнем ряду, стены заставляют менять ряд →
+// ящик + уступ вглубь на крышу радиорубки (Наблюдатель) → батут на мостки под очередями стрел →
+// большой ящик в затопленный проём, вентилятор над ним → «бомба» (Механик).
 const PARK = 0x5b6b4f;
+const HALL = 0x6a6a6a;
 export const BLETCHLEY_LEVEL: Level = {
   id: 'bletchley',
   title: 'Блетчли-парк, 1941',
   bounds: EPOCH_BOUNDS,
   spawn: EPOCH_SPAWN,
   platforms: [
-    ground(-30, -2, PARK),
-    ground(1, 30, PARK),
-    block(-15, 1.2, 1.2, 0x7a6a50),
-    backLedge(-13, 1.4, 2.6, 0x6a6a6a),
-    ledge(-8, 6, 4, 0x4a4a4a), // крыша барака-радиорубки
-    { x: -8, y: 1.85, w: 6, h: 3.7, z: -2.4, d: 1, color: 0x8b8f7a, kind: 'hut', decor: true },
-    // Лабиринт: стены перекрывают то передний, то задний ряд — обходить по W/S.
-    depthWall(6, 'front', 0x6b6b5a),
-    depthWall(9, 'back', 0x6b6b5a),
-    depthWall(12, 'front', 0x6b6b5a),
-    { x: 15, y: 1.5, w: 7, h: 3, z: -2.4, d: 1, color: 0x8b8f7a, kind: 'hut', decor: true },
+    ground(-30, -10, PARK),
+    ...moat(-10, -7, 0x3a5a6a),
+    ground(-7, 46, PARK),
+    depthWall(-2, 'front', 0x6b6b5a),
+    depthWall(3, 'back', 0x6b6b5a),
+    depthWall(8, 'front', 0x6b6b5a),
+    depthWall(13, 'back', 0x6b6b5a),
+    backLedge(22, 1.6, 2.6, HALL),
+    span(24, 32, 4, 0x4a4a4a), // крыша барака-радиорубки
+    span(32, 33.5, 2.2, HALL), // ступень с обратной стороны
+    { x: 28, y: 1.85, w: 8, h: 3.7, z: -2.4, d: 1, color: 0x8b8f7a, kind: 'hut', decor: true },
+    trampoline(43.5),
+    ledge(52, 10, 4.8, HALL), // мостки над двором
+    span(58, 66, 2.8, HALL), // платформа перед проёмом, на ней большой ящик
+    ...moat(66, 72.6, 0x3a5a6a, 0.4, 0),
+    span(72.6, 100, 2.8, HALL), // зал «бомбы»
+    { x: 88, y: 4.3, w: 7, h: 3, z: -2.4, d: 1, color: 0x8b8f7a, kind: 'hut', decor: true },
   ],
   stations: [
     returnStation,
     { id: 'narrator', kind: 'narrator', x: -19, y: 0, label: 'Поговорить с Тьюрингом', agent: 'turing' },
-    { id: 'observer', kind: 'observer', x: -7, y: 4, label: 'Крыша радиорубки — роль Наблюдателя' },
-    { id: 'mechanic', kind: 'mechanic', x: 15, y: 0, label: '«Бомба» — роль Механика' },
+    { id: 'reset1', kind: 'reset', x: 17.5, y: 0, label: 'Вернуть ящик у радиорубки', crates: ['hut'] },
+    { id: 'observer', kind: 'observer', x: 29, y: 4, label: 'Крыша радиорубки — роль Наблюдателя' },
+    { id: 'reset2', kind: 'reset', x: 59.5, y: 2.8, label: 'Вернуть большой ящик', crates: ['big'] },
+    { id: 'mechanic', kind: 'mechanic', x: 88, y: 2.8, label: '«Бомба» — роль Механика' },
   ],
-  coins: coins('bletchley', [[-24, 2.2], [-15, 2.0], [-13, 3.4, -1], [-9, 4.8], [-0.5, 1.6], [7.5, 0.7], [10.5, 0.7], [27, 0.8]]),
-  checkpoints: [{ x: 1.5, y: 0 }],
+  coins: coins('bletchley', [[-8.5, 1.6], [0.5, 0.8, 1.1], [5.5, 0.8, -1.1], [10.5, 0.8, 1.1], [22, 3.4, -1], [26, 5.0], [43.5, 5.6], [52, 6.6], [69.5, 3.8], [80, 3.6], [97, 3.6]]),
+  checkpoints: [{ x: -6.5, y: 0 }, { x: 16.5, y: 0 }, { x: 34.5, y: 0 }, { x: 58.6, y: 2.8 }, { x: 74, y: 2.8 }],
+  crates: [crate('hut', 14.5, [23.4, 0]), crate('big', 62, [67.6, 0], 2.8, 2.8, 0x8a6a4a)],
+  arrows: [{ x: 56.8, y: 5.4, dir: -1, range: 10, period: 1.8 }],
+  fans: [
+    // Лабиринт: у каждой стены в обходном ряду — вентилятор-«ворота»; открываются волной.
+    { x: -1.75, y: 0, dir: -1, len: 4.5, h: 3.2, z: -1, d: 1, period: 4, on: 2 },
+    { x: 3.25, y: 0, dir: -1, len: 4.5, h: 3.2, z: 1, d: 1, period: 4, on: 2, phase: 1 },
+    { x: 8.25, y: 0, dir: -1, len: 4.5, h: 3.2, z: -1, d: 1, period: 4, on: 2, phase: 2 },
+    { x: 13.25, y: 0, dir: -1, len: 4.5, h: 3.2, z: 1, d: 1, period: 4, on: 2, phase: 3 },
+    { x: 80, y: 2.8, dir: -1, len: 16, h: 3, period: 5, on: 2.5 },
+  ],
 };
 
-// ───────────── Байконур: бункер за стенами-лабиринтом, монтажные леса над ямой до верхней площадки.
+// ───────────── Байконур, 1961.
+// Ящик — щит от пневмопушки и ступенька на бункер (Наблюдатель) → монтажные леса: стрелы по ярусам,
+// батут на верхний ярус, «выхлоп» двигателя порывами → площадка у ракеты (Механик).
 const STEPPE = 0xb8a46a;
+const STEEL = 0x8a8f99;
 export const BAIKONUR_LEVEL: Level = {
   id: 'baikonur',
   title: 'Байконур, 1961',
@@ -287,26 +420,37 @@ export const BAIKONUR_LEVEL: Level = {
   spawn: EPOCH_SPAWN,
   platforms: [
     ground(-30, -6, STEPPE),
-    ground(-3, 8, STEPPE),
-    ground(11, 30, STEPPE),
-    depthWall(-13, 'back', 0x7d7a6a), // бункер: вход только у камеры…
-    depthWall(-9, 'front', 0x7d7a6a), // …выход только у фона
-    { x: -11, y: 0.4, w: 3, h: 0.8, z: -2.3, d: 1.2, color: 0x5d5a4a, kind: 'table', decor: true },
-    block(1, 1.6, 1.4, 0x8a8f99),
-    backLedge(4, 2, 2.8, 0x8a8f99),
-    ledge(7, 2, 4.2, 0x8a8f99),
-    ledge(13.5, 4, 4.5, 0x8a8f99), // верхняя площадка над ямой
-    { x: 24, y: 5, w: 1.6, h: 10, z: -2.4, d: 1.6, color: 0xe8e8e8, kind: 'rocket', decor: true },
-    { x: 21.6, y: 4, w: 0.8, h: 8, z: -2.4, d: 0.8, color: 0xc0392b, kind: 'tower', decor: true },
+    ground(-3, 34, STEPPE),
+    span(14, 34, 2.8, 0x7d7a6a), // бункер управления
+    { x: 29, y: 3.2, w: 3, h: 0.8, z: -2.3, d: 1.2, color: 0x5d5a4a, kind: 'table', decor: true },
+    // Монтажные леса над котлованом.
+    ledge(38, 3, 3.6, STEEL),
+    ledge(43, 3, 4.6, STEEL),
+    ledge(48.5, 3, 4.6, STEEL),
+    trampoline(48.5, 4.6),
+    ledge(55, 6, 9.4, STEEL),
+    parapet(57.7, 9.4, 0x5d6470),
+    ledge(63.5, 5, 9.4, STEEL),
+    ledge(73, 10, 8, 0xc0392b), // площадка обслуживания у ракеты
+    ground(78, 100, STEPPE),
+    { x: 86, y: 5, w: 1.6, h: 10, z: -2.4, d: 1.6, color: 0xe8e8e8, kind: 'rocket', decor: true },
+    { x: 83.6, y: 4, w: 0.8, h: 8, z: -2.4, d: 0.8, color: 0xc0392b, kind: 'tower', decor: true },
   ],
   stations: [
     returnStation,
     { id: 'narrator', kind: 'narrator', x: -17, y: 0, label: 'Поговорить с Королёвым', agent: 'korolev' },
-    { id: 'observer', kind: 'observer', x: -11, y: 0, label: 'Бункер управления — роль Наблюдателя' },
-    { id: 'mechanic', kind: 'mechanic', x: 14, y: 4.5, label: 'Монтажные леса — роль Механика' },
+    { id: 'reset1', kind: 'reset', x: -1.5, y: 0, label: 'Вернуть ящик у бункера', crates: ['shield'] },
+    { id: 'observer', kind: 'observer', x: 30, y: 2.8, label: 'Бункер управления — роль Наблюдателя' },
+    { id: 'mechanic', kind: 'mechanic', x: 75, y: 8, label: 'Монтажные леса — роль Механика' },
   ],
-  coins: coins('baikonur', [[-24, 2.2], [-11, 0.8], [-4.5, 1.6], [1, 2.2], [4, 3.6, -1], [7, 5.0], [15.5, 5.3], [27, 0.8]]),
-  checkpoints: [{ x: -2.5, y: 0 }, { x: 11.5, y: 0 }],
+  coins: coins('baikonur', [[-4.5, 1.6], [7, 2.2], [14, 3.6], [24, 3.6], [36, 3.4], [43, 5.4], [48.5, 8.6], [55, 10.2], [60.3, 10.2], [68, 9.0], [90, 0.8]]),
+  checkpoints: [{ x: -2.5, y: 0 }, { x: 32, y: 2.8 }, { x: 47.5, y: 4.6 }, { x: 53, y: 9.4 }],
+  crates: [crate('shield', 3, [13.4, 0])],
+  arrows: [
+    { x: 13.8, y: 0.6, dir: -1, range: 16, period: 1.5 }, // пневмопушка у входа: ящик-щит её гасит
+    { x: 44.8, y: 5.2, dir: -1, range: 8.5, period: 2.2 }, // заклёпки по ярусу лесов
+  ],
+  fans: [{ x: 66, y: 9.4, dir: -1, len: 18, h: 3, period: 5, on: 2.5 }],
 };
 
 export const LEVELS: Record<string, Level> = Object.fromEntries(

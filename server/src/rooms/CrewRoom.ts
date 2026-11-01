@@ -2,6 +2,7 @@ import { Room, ServerError, matchMaker, type AuthContext, type Client } from 'co
 import {
   AGENT_PROFILES,
   ASK_TIMEOUT_MS,
+  CRATE_PUSH_TTL_MS,
   ClientMsg,
   COIN_NAME,
   EMOTES,
@@ -16,16 +17,19 @@ import {
   ServerMsg,
   XP,
   achievement,
+  canPush,
   colorForName,
   epochByLevel,
   getLevel,
   getSkin,
   isNearStation,
   levelFromXp,
+  stepCrates,
   touchesCoin,
   type AchievementBroadcast,
   type ChatBroadcast,
   type CoinPickup,
+  type CrateBody,
   type CreateOptions,
   type CrewRoomMetadata,
   type EmoteBroadcast,
@@ -36,6 +40,7 @@ import {
   type LlmAck,
   type LlmHintRequest,
   type LlmSayRequest,
+  type PushPayload,
   type PuzzleActionPayload,
   type PuzzleViewMessage,
   type Role,
@@ -45,6 +50,7 @@ import {
   type ShopResult,
   type TeleportPayload,
   type XpGain,
+  CrateState,
   CrewState,
   PlayerState,
   PuzzleState,
@@ -87,6 +93,7 @@ const TELEMETRY_MS = 200;
 const IDLE_AFTER_MS = 30_000;
 const LIKE_COOLDOWN_MS = 15_000;
 const EMOTE_COOLDOWN_MS = 800;
+const CRATE_TICK_MS = 33;
 
 function normalizeName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim().slice(0, 20) : '';
@@ -127,6 +134,11 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   private likeCooldown = new Map<string, number>();
   private emoteCooldown = new Map<string, number>();
   private viewTimer?: ReturnType<typeof setTimeout>;
+  /** Ящики уровня (точная физика) и кто их сейчас толкает: id ящика → направление и срок. */
+  private crates: CrateBody[] = [];
+  private pushes = new Map<string, { dir: 1 | -1; until: number }>();
+  /** Награды паркура: «playerId:stationId» — каждому игроку один раз за сессию. */
+  private rewardsClaimed = new Set<string>();
 
   /** Короткий код комнаты вместо случайного id — его диктуют соседу по столу. */
   private async generateCode(): Promise<string> {
@@ -163,10 +175,13 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     this.onMessage(ClientMsg.Like, (client: CrewClient, msg: unknown) => this.handleLike(client, msg));
     this.onMessage(ClientMsg.Emote, (client: CrewClient, msg: unknown) => this.handleEmote(client, msg));
     this.onMessage(ClientMsg.Ask, (client: CrewClient, msg: unknown) => this.handleAsk(client, msg));
+    this.onMessage(ClientMsg.Push, (client: CrewClient, msg: unknown) => this.handlePush(client, msg));
 
     this.clock.setInterval(() => this.persistPositions(), PERSIST_INTERVAL_MS);
     this.clock.setInterval(() => this.sampleTelemetry(), TELEMETRY_MS);
     this.clock.setInterval(() => this.checkIdle(), 5000);
+    this.clock.setInterval(() => this.tickCrates(), CRATE_TICK_MS);
+    this.resetCrates();
 
     llmHub.register(this.roomId, {
       snapshot: () => this.snapshot(),
@@ -571,7 +586,79 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
         return this.returnToShip(station);
       case 'shop':
         return; // панель магазина открывает клиент; покупки — отдельными сообщениями
+      case 'reward':
+        return this.claimReward(client, station);
+      case 'reset':
+        this.resetCrates(station.crates);
+        this.broadcast(ServerMsg.System, { text: `${client.userData.name} вернул ящики на место` });
+        this.emit('crate.reset', client.sessionId, { crates: station.crates ?? [] });
+        return;
     }
+  }
+
+  // ───────────────────────── ящики и награды полосы препятствий
+
+  /** Ящики уровня — в исходное положение (все или перечисленные). */
+  private resetCrates(ids?: string[]) {
+    const defs = this.level.crates ?? [];
+    if (!ids) {
+      this.crates = defs.map((d) => ({ id: d.id, x: d.x, y: d.y, vy: 0, push: 0 }));
+      this.pushes.clear();
+      this.state.crates.clear();
+    }
+    for (const d of defs) {
+      if (ids && !ids.includes(d.id)) continue;
+      const c = this.crates.find((b) => b.id === d.id);
+      if (c) Object.assign(c, { x: d.x, y: d.y, vy: 0, push: 0 });
+      this.pushes.delete(d.id);
+      const st = this.state.crates.get(d.id);
+      if (st) Object.assign(st, { x: d.x, y: d.y });
+      else this.state.crates.set(d.id, new CrateState({ x: d.x, y: d.y }));
+    }
+  }
+
+  /** «Толкаю»: сервер проверяет, что игрок (по серверной позиции) вплотную к ящику с нужной стороны. */
+  private handlePush(client: CrewClient, msg: unknown) {
+    const { crateId, dir } = (msg ?? {}) as Partial<PushPayload>;
+    const p = this.state.players.get(client.sessionId);
+    const def = this.level.crates?.find((c) => c.id === crateId);
+    const c = this.crates.find((b) => b.id === crateId);
+    if (!p || !def || !c || (dir !== 1 && dir !== -1)) return;
+    if (!canPush(p, dir, def, c)) return;
+    this.pushes.set(def.id, { dir, until: Date.now() + CRATE_PUSH_TTL_MS });
+  }
+
+  private tickCrates() {
+    if (!this.crates.length) return;
+    const now = Date.now();
+    for (const c of this.crates) {
+      const push = this.pushes.get(c.id);
+      c.push = push && push.until > now ? push.dir : 0;
+    }
+    stepCrates(this.level, this.crates, CRATE_TICK_MS / 1000);
+    for (const c of this.crates) {
+      const st = this.state.crates.get(c.id);
+      if (!st) continue;
+      const x = Math.round(c.x * 1000) / 1000;
+      const y = Math.round(c.y * 1000) / 1000;
+      if (st.x !== x) st.x = x;
+      if (st.y !== y) st.y = y;
+    }
+  }
+
+  private claimReward(client: CrewClient, station: { id: string; reward?: number }) {
+    const m = this.member(client);
+    if (!m || !station.reward) return;
+    const key = `${client.userData!.playerId}:${station.id}`;
+    if (this.rewardsClaimed.has(key)) {
+      client.send(ServerMsg.System, { text: 'Награду за этот паркур ты уже забрал — до следующей сессии!' });
+      return;
+    }
+    this.rewardsClaimed.add(key);
+    m.state.coins += station.reward;
+    this.saveMember(m);
+    this.emit('reward.claim', client.sessionId, { station: station.id, coins: station.reward, balance: m.state.coins });
+    this.broadcast(ServerMsg.System, { text: `${client.userData!.name} прошёл паркур-отсек: +${station.reward} ${COIN_NAME}` });
   }
 
   private toggleRole(client: CrewClient, role: Role) {
@@ -665,6 +752,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
 
     const epoch = epochByLevel(levelId);
     this.puzzle = epoch ? createPuzzle(epoch.puzzle.id) : null;
+    this.resetCrates();
     this.scenario = new ScenarioRuntime(levelId);
     const pz = this.state.puzzle;
     pz.id = this.puzzle?.id ?? '';

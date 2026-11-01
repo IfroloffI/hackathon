@@ -88,14 +88,40 @@ test('уходя в глубину перед объектом, упираешь
   assert.equal(b.z, -1.5 + 0.4);
 });
 
-test('на всех уровнях ступеньки по высоте не выше прыжка (декорации не в счёт)', () => {
+test('на всех уровнях ступеньки по высоте не выше прыжка, а с батутом — не выше подброса (декорации не в счёт)', () => {
   const jumpHeight = PHYSICS.jumpSpeed ** 2 / (2 * PHYSICS.gravity);
+  const bounceHeight = PHYSICS.bounceSpeed ** 2 / (2 * PHYSICS.gravity);
   for (const lvl of Object.values(LEVELS)) {
+    const reach = lvl.platforms.some((p) => p.kind === 'trampoline') ? bounceHeight : jumpHeight;
     const tops = [0, ...lvl.platforms.filter((p) => !p.decor).map((p) => p.y + p.h / 2)].sort((a, b) => a - b);
     for (let i = 1; i < tops.length; i++) {
-      assert.ok(tops[i] - tops[i - 1] < jumpHeight - 0.2, `${lvl.id}: ступень ${tops[i - 1]} → ${tops[i]} выше прыжка ${jumpHeight}`);
+      assert.ok(tops[i] - tops[i - 1] < reach - 0.2, `${lvl.id}: ступень ${tops[i - 1]} → ${tops[i]} выше ${reach}`);
     }
   }
+});
+
+test('батут подбрасывает выше прыжка, а приземление на него не считается опорой', () => {
+  const lvl: Level = { ...level, platforms: [...level.platforms, { x: 0, y: 0.5, w: 1.8, h: 1, color: 0, kind: 'trampoline' }] };
+  const b = body(0, 3, 0, 0);
+  let maxY = 0;
+  let grounded = false;
+  for (let i = 0; i < 200; i++) {
+    b.vy = Math.max(b.vy - PHYSICS.gravity / 60, -20);
+    grounded = moveAndCollide(b, 1 / 60, lvl).grounded || grounded;
+    if (i > 40) maxY = Math.max(maxY, b.y);
+  }
+  assert.ok(maxY > 1 + 4.5, `подброс до ${maxY}`);
+  assert.ok(!grounded, 'на батуте не стоят');
+});
+
+test('вода рва не твёрдая: сквозь неё проваливаешься', () => {
+  const lvl: Level = { ...level, platforms: [{ x: 0, y: -0.45, w: 4, h: 0.2, color: 0, kind: 'moat', ghost: true }] };
+  const b = body(0, 0, 0, 0);
+  for (let i = 0; i < 30; i++) {
+    b.vy = Math.max(b.vy - PHYSICS.gravity / 60, -20);
+    moveAndCollide(b, 1 / 60, lvl);
+  }
+  assert.ok(b.y < -1, `y=${b.y}`);
 });
 
 test('станции стоят на полу или на достижимой платформе', () => {

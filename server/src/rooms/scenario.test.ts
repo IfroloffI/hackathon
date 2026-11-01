@@ -19,9 +19,9 @@ test('сценарий: брифинг → роли → этапы → эвак�
   assert.equal(r.step?.id, 'reach');
   assert.equal(r.rolesOpen, true);
 
-  now = 300_000;
+  now = 400_000;
   const c2 = r.update(facts({ rolesFilled: true }));
-  assert.equal(c2[0].underPar, false, '270 с при контроле 120 с — без бонуса');
+  assert.equal(c2[0].underPar, false, '370 с при контроле 300 с — без бонуса');
   assert.equal(r.step?.id, 'stage1');
 
   r.update(facts({ rolesFilled: true, stagesPassed: 2 }));

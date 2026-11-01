@@ -1,19 +1,25 @@
 import * as THREE from 'three';
-import { EPOCHS, type Level } from '@chronolet/shared';
+import { EPOCHS, mechClock, type CratePos, type Level } from '@chronolet/shared';
 import { Character } from '../Character.ts';
 import { disposeTree, levelDepth, platformMesh, stationMarker } from './common.ts';
 import { vkCoin, type CoinView } from './vkCoin.ts';
 import type { Decor } from './decor.ts';
+import { buildObstacles } from './obstacles.ts';
 import { decorateHub } from './hub.ts';
 import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua, decorateWoolsthorpe } from './epochs.ts';
 
 export interface World {
-  update(t: number, dt: number): void;
+  /** focusX — где камера: за ней ходит солнце с тенями (уровни длинные). */
+  update(t: number, dt: number, focusX?: number): void;
   setParts(parts: string[]): void;
   /** Спрятать уже собранные сферы (при входе на уровень). */
   hideCoins(ids: Iterable<string>): void;
   /** Сферу только что подобрали — анимация «лопнула» и исчезла. */
   popCoin(id: string): void;
+  /** Позиции ящиков с сервера. */
+  setCrates(list: readonly CratePos[]): void;
+  /** Где свой игрок — для флажков чекпоинтов. */
+  setProgress(x: number): void;
   dispose(): void;
 }
 
@@ -71,18 +77,28 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
   }
 
   const decor = (THEMES[level.id] ?? decorateHub)(g, scene);
+  const obstacles = buildObstacles(g, level);
 
   // Мигающие светодиоды пультов и анимированные объекты (батуты, вентиляторы, метки станций…).
   const leds: THREE.Mesh[] = [];
   const animated: ((t: number) => void)[] = [];
+  const followers: { light: THREE.DirectionalLight; x: number }[] = [];
   g.traverse((o) => {
     if (o.userData.blink !== undefined) leds.push(o as THREE.Mesh);
     if (typeof o.userData.update === 'function') animated.push(o.userData.update);
+    if (o.userData.follow) followers.push({ light: o as THREE.DirectionalLight, x: o.position.x });
   });
 
   return {
-    update(t, dt) {
+    update(t, dt, focusX = 0) {
       decor.update?.(t);
+      obstacles.update(t, mechClock(), dt);
+      // Солнце (и его тени) едет за камерой с шагом, чтобы тени не «дрожали».
+      const fx = Math.round(focusX / 4) * 4;
+      for (const f of followers) {
+        f.light.position.x = f.x + fx;
+        f.light.target.position.x = fx;
+      }
       for (const m of markers) {
         const ring = m.userData.pulse as THREE.Mesh;
         ring.scale.setScalar(1 + Math.sin(t * 3) * 0.05);
@@ -98,6 +114,12 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
     },
     setParts(parts) {
       decor.setParts?.(parts);
+    },
+    setCrates(list) {
+      obstacles.setCrates(list);
+    },
+    setProgress(x) {
+      obstacles.setProgress(x);
     },
     hideCoins(ids) {
       for (const id of ids) {

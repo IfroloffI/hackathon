@@ -78,8 +78,9 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   key.shadow.mapSize.set(2048, 2048);
   key.shadow.radius = 5;
   key.shadow.bias = -0.0004;
-  Object.assign(key.shadow.camera, { left: -18, right: 18, top: 12, bottom: -4 });
-  g.add(key);
+  Object.assign(key.shadow.camera, { left: -22, right: 22, top: 14, bottom: -4 });
+  key.userData.follow = true;
+  g.add(key, key.target);
   const engineLight = new THREE.PointLight(0x7fd8ff, 30, 12);
   engineLight.position.set(0, 3.5, -1);
   g.add(engineLight);
@@ -182,8 +183,11 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(hanger);
   g.add(badge('МАГАЗИН', 2.4, '#0077ff', -12.5, 3.2, -2.2));
 
+  const gym = decorateGym(g);
+
   return {
     update(t) {
+      gym(t);
       core.rotation.set(t * 0.6, t, 0);
       core.position.y = 3.6 + Math.sin(t * 2) * 0.08;
       bands.forEach((b, i) => (b.scale.setScalar(1 + Math.sin(t * 3 + i) * 0.015)));
@@ -205,5 +209,48 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
       }
       coreMat.emissiveIntensity = 0.8 + (parts.length / EPOCHS.length) * 2.2;
     },
+  };
+}
+
+/**
+ * Паркур-отсек за переборкой (x 16…62): тёмный трюм с фиолетовыми фермами, шахта вниз (упал — к флажку),
+ * иллюминатор во всю стену и вывеска. Сами препятствия — из данных уровня (obstacles.ts).
+ */
+function decorateGym(g: THREE.Group): (t: number) => void {
+  const GYM_HULL = 0x2f2856;
+  const GYM_TRIM = 0x9b7bff;
+  const space = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
+  space.position.set(40, 5, -12);
+  g.add(space);
+  const wall = roundRectShape(18.05, -6, 44.5, 18, 0.6);
+  for (const x of [26, 40, 54]) wall.holes.push(roundRectShape(x - 4, 3, 8, 6, 2.6));
+  g.add(cutout(wall, GYM_HULL, -4.9, 0.5, 'card'));
+  for (const x of [26, 40, 54]) {
+    const frame = mesh(soft(8.4, 0.3, 0.4, 0.14), craft('felt', GYM_TRIM), x, 3, -4.3);
+    g.add(frame, mesh(soft(8.4, 0.3, 0.4, 0.14), craft('felt', GYM_TRIM), x, 9, -4.3));
+  }
+  // Фермы шахты и потолок.
+  for (let x = 20; x <= 60; x += 5) {
+    g.add(mesh(soft(0.6, 18, 0.6, 0.2), craft('card', 0x241e44), x, 3, -4.2));
+    const brace = mesh(soft(0.18, 6.4, 0.18, 0.06), craft('metal', 0x6a5aa0), x + 2.5, -1.5, -4.1);
+    brace.rotation.z = 0.7;
+    g.add(brace);
+  }
+  g.add(mesh(soft(46, 1.2, 6, 0.3), craft('card', 0x241e44), 39.4, 12.4, -1.5));
+  // Мягкая подсветка «дна» шахты — видно, что падать некуда.
+  const pit = mesh(new THREE.PlaneGeometry(34, 4), glowing(0x6a3cff, 0.5), 45, -4.6, 0, false);
+  pit.rotation.x = -Math.PI / 2;
+  g.add(pit);
+  const glow = new THREE.PointLight(0xb08bff, 18, 16);
+  glow.position.set(40, 6, 0);
+  g.add(glow);
+  const finish = new THREE.PointLight(0xffd23f, 14, 8);
+  finish.position.set(59.5, 9.5, 0.5);
+  g.add(finish);
+  g.add(badge('ПАРКУР-ОТСЕК', 4.4, '#6a4bd0', 21, 4.4, -3.6));
+  g.add(badge('ФИНИШ · +5 VK COIN', 4.4, '#c99a12', 59, 10.4, -3.6));
+  g.add(badge('ПАРКУР →', 2.4, '#6a4bd0', 13.6, 3.4, -2.6));
+  return (t) => {
+    finish.intensity = 12 + Math.sin(t * 3) * 4;
   };
 }

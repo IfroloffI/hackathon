@@ -30,8 +30,9 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
   sun.shadow.mapSize.set(4096, 2048);
   sun.shadow.radius = 5;
   sun.shadow.bias = -0.0004;
-  Object.assign(sun.shadow.camera, { left: -34, right: 34, top: 14, bottom: -4, near: 1, far: 80 });
-  g.add(sun);
+  Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 16, bottom: -4, near: 1, far: 80 });
+  sun.userData.follow = true;
+  g.add(sun, sun.target);
   // Контровой свет сзади — «обводит» силуэты, как софтбокс над диорамой.
   const rim = new THREE.DirectionalLight(p.night ? 0x8fa8ff : 0xfff2dd, p.night ? 1.4 : 1);
   rim.position.set(-4, 6, -10);
@@ -42,7 +43,7 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
   floor.rotation.x = -Math.PI / 2;
   floor.castShadow = false;
   g.add(floor);
-  for (let x = -40; x <= 40; x += 4.6) {
+  for (let x = -40; x <= 110; x += 4.6) {
     const tuft = new THREE.Group();
     for (let k = 0; k < 3; k++) {
       const b = mesh(new THREE.SphereGeometry(0.7 + ((x * 7 + k) % 5) * 0.1, 20, 14), craft('felt', p.tuft), k * 0.7, 0, 0, false);
@@ -52,9 +53,9 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
     tuft.position.set(x + ((x * 13) % 3), -1.6, 4.4);
     g.add(tuft);
   }
-  g.add(cutout(hillsShape(4, 1.8, 0.08, 1), p.hills[2], -34, 0.5));
-  g.add(cutout(hillsShape(2, 1.2, 0.13, 3), p.hills[1], -22, 0.5));
-  g.add(cutout(hillsShape(0.4, 0.7, 0.2, 5), p.hills[0], -12, 0.4));
+  g.add(cutout(hillsShape(4, 1.8, 0.08, 1, 130), p.hills[2], -34, 0.5));
+  g.add(cutout(hillsShape(2, 1.2, 0.13, 3, 130), p.hills[1], -22, 0.5));
+  g.add(cutout(hillsShape(0.4, 0.7, 0.2, 5, 130), p.hills[0], -12, 0.4));
   if (p.night) g.add(stars(1200, 90, 0xfff6dc, 0.35));
   g.add(landedShip(-25));
 }
@@ -73,7 +74,8 @@ function clouds(g: THREE.Group, n: number, y = 11): (t: number) => void {
     list.push(c);
     g.add(c);
   }
-  return (t) => list.forEach((c, i) => (c.position.x = ((-40 + i * 16 + t * 0.5 + 50) % 100) - 50));
+  // Облака плывут вправо по всей длине уровня и возвращаются слева.
+  return (t) => list.forEach((c, i) => (c.position.x = ((i * 16 + t * 0.5) % 180) - 50));
 }
 
 function disc(g: THREE.Group, color: number, r: number, x: number, y: number, z: number) {
@@ -117,19 +119,19 @@ export function decorateAlexandria(g: THREE.Group, scene: THREE.Scene): Decor {
     sun: { color: 0xfff0d0, intensity: 2.4, pos: [8, 18, 10] }, hills: [0xe0a862, 0xd99c5a, 0xc98a4c],
   });
   disc(g, 0xfff3c0, 3, 12, 20, -60);
-  for (const [x, s] of [[-30, 9], [-14, 12], [26, 10]] as const) g.add(cutout(polyShape([[x - s, -1], [x, s * 0.9], [x + s, -1]]), 0xe9c07a, -28, 0.6, 'card'));
+  for (const [x, s] of [[-26, 9], [-4, 12], [40, 10], [70, 13], [104, 9]] as const) g.add(cutout(polyShape([[x - s, -1], [x, s * 0.9], [x + s, -1]]), 0xe9c07a, -28, 0.6, 'card'));
   const lib = new THREE.Group();
-  for (let x = 18; x <= 27; x += 1.8) lib.add(mesh(new THREE.CylinderGeometry(0.3, 0.36, 5, 20), craft('card', 0xf6ead0), x, 2.5, -6));
-  lib.add(mesh(soft(11, 0.7, 2, 0.2), craft('card', 0xf6ead0), 22.5, 5.3, -6));
-  const roof = mesh(new THREE.CylinderGeometry(0.01, 6, 1.6, 3), craft('felt', 0x2bb5a8), 22.5, 6.4, -6);
+  for (let x = 84; x <= 93; x += 1.8) lib.add(mesh(new THREE.CylinderGeometry(0.3, 0.36, 7, 20), craft('card', 0xf6ead0), x, 3.5, -6));
+  lib.add(mesh(soft(11, 0.7, 2, 0.2), craft('card', 0xf6ead0), 88.5, 7.3, -6));
+  const roof = mesh(new THREE.CylinderGeometry(0.01, 6, 1.6, 3), craft('felt', 0x2bb5a8), 88.5, 8.4, -6);
   roof.scale.z = 0.3;
   lib.add(roof);
   g.add(lib);
-  for (const x of [-20, -13, 4, 9]) g.add(palm(x, -6));
-  g.add(signSprite('СИЕНА', -9, 4.6, -2, 2.6, '#a8642a'));
-  g.add(signSprite('АЛЕКСАНДРИЯ', 13, 7.4, -2, 3.6, '#a8642a'));
-  g.add(signSprite('← 5000 стадий →', 2, 3.2, -3, 3.2, '#2bb5a8'));
-  return { update: clouds(g, 6) };
+  for (const x of [-20, -13, 4, 20, 47, 63, 76, 99]) g.add(palm(x, -6));
+  g.add(signSprite('СИЕНА', 35, 5, -2, 2.6, '#a8642a'));
+  g.add(signSprite('АЛЕКСАНДРИЯ', 89, 8.4, -2, 3.6, '#a8642a'));
+  g.add(signSprite('← 5000 стадий →', 62, 4.2, -3, 3.2, '#2bb5a8'));
+  return { update: clouds(g, 11) };
 }
 
 /** Падуя, ночь: дома с огнями, луна, яркая Венера, армиллярная сфера в мастерской, телескоп на крыше. */
@@ -141,7 +143,7 @@ export function decoratePadua(g: THREE.Group, scene: THREE.Scene): Decor {
   disc(g, 0xfff6dc, 2.5, -28, 22, -70);
   const venus = mesh(new THREE.SphereGeometry(0.6, 16, 12), glowing(0xfff6c8, 3), 30, 16, -60, false);
   g.add(venus);
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 24; i++) {
     const x = -30 + i * 5.5;
     const h = 6 + ((i * 37) % 4);
     const hs = house(4.6, h, [0x9a5238, 0xb46a46, 0x7f4530][i % 3], 0x5a2a20, 1.1);
@@ -149,7 +151,7 @@ export function decoratePadua(g: THREE.Group, scene: THREE.Scene): Decor {
     g.add(hs);
   }
   const arm = new THREE.Group();
-  arm.position.set(-4, 1.45, -2.2);
+  arm.position.set(41.5, 4.25, -2.2);
   arm.add(mesh(new THREE.SphereGeometry(0.15, 16, 12), glowing(0xffd36b, 1.5)));
   const rings: THREE.Mesh[] = [];
   for (let i = 0; i < 3; i++) {
@@ -159,14 +161,15 @@ export function decoratePadua(g: THREE.Group, scene: THREE.Scene): Decor {
     arm.add(r);
   }
   g.add(arm);
-  const scope = mesh(new THREE.CylinderGeometry(0.12, 0.2, 1.8, 16), craft('wood', 0x8a5532), 18.6, 6.6, -1.2);
+  const scope = mesh(new THREE.CylinderGeometry(0.12, 0.2, 1.8, 16), craft('wood', 0x8a5532), 93.6, 7.4, -1.2);
   scope.rotation.z = -0.9;
-  g.add(scope, mesh(new THREE.CylinderGeometry(0.04, 0.04, 1, 8), craft('metal', 0x444444), 18.3, 6.1, -1.2));
+  g.add(scope, mesh(new THREE.CylinderGeometry(0.04, 0.04, 1, 8), craft('metal', 0x444444), 93.3, 6.9, -1.2));
   const lamp = new THREE.PointLight(0xffb35c, 12, 9);
-  lamp.position.set(-4, 3, -1);
+  lamp.position.set(41.5, 5.8, -1);
   g.add(lamp);
-  g.add(signSprite('МАСТЕРСКАЯ', -4, 3.8, -2, 3, '#b5603f'));
-  g.add(signSprite('ТЕЛЕСКОП', 18, 8.2, -2, 2.6, '#b5603f'));
+  g.add(signSprite('МАСТЕРСКАЯ', 41, 6.6, -2, 3, '#b5603f'));
+  g.add(signSprite('ТЕЛЕСКОП', 93, 9.2, -2, 2.6, '#b5603f'));
+  g.add(signSprite('ПЕРЕУЛОК СТРАЖИ', 6, 4.4, -2.6, 3.6, '#b5603f'));
   return {
     update(t) {
       rings.forEach((r, i) => (r.rotation.z = t * (0.3 + i * 0.2)));
@@ -182,7 +185,7 @@ export function decorateWoolsthorpe(g: THREE.Group, scene: THREE.Scene): Decor {
     sun: { color: 0xfffbe8, intensity: 2.4, pos: [10, 20, 10] }, hills: [0x8cc06a, 0x76ab58, 0x5f9447],
   });
   disc(g, 0xfff3c0, 2.6, 14, 21, -60);
-  for (const [x, z, s] of [[-28, -9, 1.2], [16, -10, 1.4], [30, -8, 1]] as const) {
+  for (const [x, z, s] of [[-28, -9, 1.2], [16, -10, 1.4], [38, -8, 1], [62, -10, 1.3], [88, -9, 1.1]] as const) {
     const tree = new THREE.Group();
     tree.add(mesh(new THREE.CylinderGeometry(0.3, 0.5, 3, 12), craft('wood', 0x7a5232), 0, 1.5));
     for (const [dx, dy, r] of [[0, 4, 1.8], [-1.3, 3.4, 1.2], [1.3, 3.5, 1.3], [0.4, 5, 1.1]] as const) tree.add(mesh(new THREE.SphereGeometry(r, 24, 16), craft('felt', 0x4f9a3c), dx, dy, 0));
@@ -195,7 +198,7 @@ export function decorateWoolsthorpe(g: THREE.Group, scene: THREE.Scene): Decor {
   farm.position.set(-2, 0, -14);
   g.add(farm);
   const target = new THREE.Group();
-  target.position.set(26, 1.4, -2);
+  target.position.set(97, 1.4, -2);
   target.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.8, 8), craft('wood', 0x6b4423), 0, -0.2, -0.1));
   [1, 0.72, 0.44, 0.18].forEach((r, i) => {
     const d = mesh(new THREE.CylinderGeometry(r, r, 0.08 + i * 0.01, 32), craft('felt', i % 2 ? 0xfff4dc : 0xe8382f), 0, 0.6, i * 0.014);
@@ -203,13 +206,13 @@ export function decorateWoolsthorpe(g: THREE.Group, scene: THREE.Scene): Decor {
     target.add(d);
   });
   g.add(target);
-  for (let x = -12; x <= 28; x += 3) g.add(mesh(soft(0.18, 0.9, 0.18, 0.06), craft('wood', 0x8b6a3e), x, 0.45, -1.95));
-  const rail = stitchLine(40, 0x8b6a3e, 0.6);
-  rail.position.set(8, 0.7, -1.95);
+  for (let x = 48; x <= 98; x += 3) g.add(mesh(soft(0.18, 0.9, 0.18, 0.06), craft('wood', 0x8b6a3e), x, 0.45, -1.95));
+  const rail = stitchLine(50, 0x8b6a3e, 0.6);
+  rail.position.set(73, 0.7, -1.95);
   g.add(rail);
-  g.add(signSprite('ПУШКА', -6, 4.6, -2, 2.2, '#4f7a3a'));
-  g.add(signSprite('ПОЛЕ МИШЕНЕЙ', 21, 4.6, -2, 3.4, '#4f7a3a'));
-  return { update: clouds(g, 6) };
+  g.add(signSprite('ПУШКА', 24, 7, -2, 2.2, '#4f7a3a'));
+  g.add(signSprite('ПОЛЕ МИШЕНЕЙ', 70, 4.6, -2, 3.4, '#4f7a3a'));
+  return { update: clouds(g, 11) };
 }
 
 /** Блетчли-парк: пасмурно, особняк, радиомачта с маячком, «бомба» с барабанами-роторами на бараке. */
@@ -228,21 +231,25 @@ export function decorateBletchley(g: THREE.Group, scene: THREE.Scene): Decor {
   }
   for (let i = 0; i < 9; i++) manor.add(mesh(soft(1, 1.4, 0.1, 0.12), glowing(0xfff0c0, 0.5), -8 + i * 2.5, 4, -18.45, false));
   g.add(manor);
-  g.add(mesh(new THREE.CylinderGeometry(0.08, 0.14, 9, 10), craft('metal', 0x666a70), -10.8, 4.5, -3.2));
-  for (const y of [5, 7, 8.6]) g.add(mesh(soft(1.6 - y * 0.12, 0.08, 0.08, 0.03), craft('metal', 0x666a70), -10.8, y, -3.2));
-  const beacon = mesh(new THREE.SphereGeometry(0.2, 14, 10), glowing(0xff3b3b, 2.5), -10.8, 9.1, -3.2, false);
+  const wing = manor.clone();
+  wing.position.x = 62;
+  g.add(wing);
+  g.add(mesh(new THREE.CylinderGeometry(0.08, 0.14, 9, 10), craft('metal', 0x666a70), 26.5, 4.5, -3.2));
+  for (const y of [5, 7, 8.6]) g.add(mesh(soft(1.6 - y * 0.12, 0.08, 0.08, 0.03), craft('metal', 0x666a70), 26.5, y, -3.2));
+  const beacon = mesh(new THREE.SphereGeometry(0.2, 14, 10), glowing(0xff3b3b, 2.5), 26.5, 9.1, -3.2, false);
   g.add(beacon);
   const drums: THREE.Mesh[] = [];
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 6; c++) {
-      const d = mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.14, 24), craft('felt', [0x2e86de, 0xe8382f, 0x27ae60][r]), 13 + c * 0.75, 0.6 + r * 0.7, -1.82);
+      const d = mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.14, 24), craft('felt', [0x2e86de, 0xe8382f, 0x27ae60][r]), 86.1 + c * 0.75, 3.5 + r * 0.7, -1.82);
       d.rotation.x = Math.PI / 2;
       drums.push(d);
       g.add(d);
     }
   }
-  g.add(signSprite('РАДИОРУБКА', -8, 5.4, -2, 3, '#4a5a3a'));
-  g.add(signSprite('«БОМБА»', 15, 4.2, -2, 2.4, '#4a5a3a'));
+  g.add(signSprite('РАДИОРУБКА', 28, 6.4, -2, 3, '#4a5a3a'));
+  g.add(signSprite('«БОМБА»', 88, 7, -2, 2.4, '#4a5a3a'));
+  g.add(signSprite('ЛАБИРИНТ БАРАКОВ', 5.5, 4.8, -2.6, 3.6, '#4a5a3a'));
   return {
     update(t) {
       drums.forEach((d, i) => (d.rotation.y = t * (1 + (i % 6) * 0.3)));
@@ -258,24 +265,24 @@ export function decorateBaikonur(g: THREE.Group, scene: THREE.Scene): Decor {
     sun: { color: 0xffd2a8, intensity: 2.2, pos: [-12, 10, 10] }, hills: [0xd08a60, 0xb87452, 0x9a6046],
   });
   disc(g, 0xfff0c0, 6, -36, 6, -80);
-  g.add(mesh(soft(5, 0.6, 4, 0.2), craft('card', 0x7f8c8d), 24, 0.3, -2.6));
-  g.add(mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.4, 12), craft('metal', 0x444444), -11, 2.2, -2.2));
-  g.add(mesh(soft(0.5, 0.26, 0.26, 0.08), craft('metal', 0x444444), -10.8, 2.9, -2.2));
+  g.add(mesh(soft(5, 0.6, 4, 0.2), craft('card', 0x7f8c8d), 86, 0.3, -2.6));
+  g.add(mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.4, 12), craft('metal', 0x444444), 31.5, 4.2, -2.2));
+  g.add(mesh(soft(0.5, 0.26, 0.26, 0.08), craft('metal', 0x444444), 31.7, 4.9, -2.2));
   const lights: THREE.Mesh[] = [];
   for (let y = 1; y < 8; y += 2) {
-    const l = mesh(new THREE.SphereGeometry(0.12, 10, 8), glowing(0xff3b3b, 2), 21.6, y, -1.9, false);
+    const l = mesh(new THREE.SphereGeometry(0.12, 10, 8), glowing(0xff3b3b, 2), 83.6, y, -1.9, false);
     lights.push(l);
     g.add(l);
   }
   for (let i = 0; i < 3; i++) {
-    const tank = mesh(new THREE.CapsuleGeometry(0.5, 0.9, 8, 20), craft('metal', 0xdfe6ee), 11 + i * 1.3, 0.55, -2.3);
+    const tank = mesh(new THREE.CapsuleGeometry(0.5, 0.9, 8, 20), craft('metal', 0xdfe6ee), 92 + i * 1.3, 0.55, -2.3);
     tank.rotation.z = Math.PI / 2;
     g.add(tank);
   }
-  g.add(signSprite('БУНКЕР', -11, 3.8, -2, 2.4, '#a8452a'));
-  g.add(signSprite('МОНТАЖНЫЙ ЦЕХ', 12, 3.4, -2, 3.6, '#a8452a'));
-  g.add(signSprite('ВОСТОК', 24, 11.8, -2.4, 2.4, '#e8382f'));
-  const drift = clouds(g, 5, 13);
+  g.add(signSprite('БУНКЕР', 30, 5.6, -2, 2.4, '#a8452a'));
+  g.add(signSprite('МОНТАЖНЫЕ ЛЕСА', 58, 13.4, -2, 3.6, '#a8452a'));
+  g.add(signSprite('ВОСТОК', 86, 11.8, -2.4, 2.4, '#e8382f'));
+  const drift = clouds(g, 9, 13);
   return {
     update(t) {
       drift(t);

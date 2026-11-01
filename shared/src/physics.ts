@@ -1,4 +1,4 @@
-import { PLAYER_SIZE } from './constants.ts';
+import { PHYSICS, PLAYER_SIZE } from './constants.ts';
 import type { Level, Platform } from './level.ts';
 
 /** Тело игрока: x/z — центр, y — низ (ступни). */
@@ -15,6 +15,8 @@ export interface CollisionResult {
   grounded: boolean;
   hitCeiling: boolean;
   hitWall: boolean;
+  /** Приземлился на батут — подброшен (grounded при этом false). */
+  bounced: boolean;
 }
 
 /** Максимальный шаг за под-итерацию — меньше самой тонкой платформы (0.4), чтобы не проскакивать насквозь. */
@@ -53,7 +55,7 @@ const overlapZ = (b: Body, e: Edges) => b.z + halfD > e.back + EPS && b.z - half
  * Оси разрешаются по отдельности (X, Z, затем Y), большие шаги дробятся на под-шаги. Меняет body на месте.
  */
 export function moveAndCollide(body: Body, dt: number, level: Level): CollisionResult {
-  const result: CollisionResult = { grounded: false, hitCeiling: false, hitWall: false };
+  const result: CollisionResult = { grounded: false, hitCeiling: false, hitWall: false, bounced: false };
   const dx = body.vx * dt;
   const dy = body.vy * dt;
   const dz = body.vz * dt;
@@ -68,6 +70,10 @@ export function moveAndCollide(body: Body, dt: number, level: Level): CollisionR
   }
 
   body.x = Math.min(bounds.maxX, Math.max(bounds.minX, body.x));
+  if (result.bounced) {
+    body.vy = PHYSICS.bounceSpeed;
+    result.grounded = false;
+  }
   return result;
 }
 
@@ -75,6 +81,7 @@ function stepX(body: Body, dx: number, level: Level, r: CollisionResult) {
   if (dx === 0) return;
   let nx = body.x + dx;
   for (const p of level.platforms) {
+    if (p.ghost) continue;
     const e = edges(p);
     // Стоим ровно на верхней грани или касаемся нижней — это не стена.
     if (!overlapY(body, e) || !overlapZ(body, e)) continue;
@@ -96,6 +103,7 @@ function stepZ(body: Body, dz: number, level: Level, r: CollisionResult) {
   let nz = body.z + dz;
   let hit = false;
   for (const p of level.platforms) {
+    if (p.ghost) continue;
     const e = edges(p);
     if (!overlapY(body, e) || !overlapX(body, e)) continue;
     if (dz > 0 && body.z + halfD <= e.back + EPS && nz + halfD > e.back) {
@@ -117,12 +125,14 @@ function stepY(body: Body, dy: number, level: Level, r: CollisionResult) {
   if (dy === 0) return;
   let ny = body.y + dy;
   for (const p of level.platforms) {
+    if (p.ghost) continue;
     const e = edges(p);
     if (!overlapX(body, e) || !overlapZ(body, e)) continue;
     if (dy < 0 && body.y >= e.top - EPS && ny < e.top) {
       ny = e.top;
       body.vy = 0;
       r.grounded = true;
+      if (p.kind === 'trampoline') r.bounced = true;
     } else if (dy > 0 && body.y + height <= e.bottom + EPS && ny + height > e.bottom) {
       ny = e.bottom - height;
       body.vy = 0;
@@ -135,6 +145,7 @@ function stepY(body: Body, dy: number, level: Level, r: CollisionResult) {
 /** Если тело оказалось внутри платформы (старая позиция из БД, спаун) — выталкиваем наверх. */
 export function resolvePenetration(body: Body, level: Level) {
   for (const p of level.platforms) {
+    if (p.ghost) continue;
     const e = edges(p);
     if (overlapX(body, e) && overlapY(body, e) && overlapZ(body, e)) body.y = e.top;
   }

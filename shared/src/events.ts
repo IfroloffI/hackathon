@@ -20,6 +20,8 @@ export type GameEventType =
   | 'part.awarded'
   | 'coin.pickup'
   | 'fall'
+  | 'crate.reset'
+  | 'reward.claim'
   | 'chat'
   | 'agent.ask'
   | 'agent.say'

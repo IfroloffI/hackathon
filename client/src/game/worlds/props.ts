@@ -36,15 +36,22 @@ function rim(color: number, w: number, d: number, y: number) {
   return t;
 }
 
-/** Ящик: картон/доски, скотч крест-накрест, оранжевая наклейка-«ручка» и кант по крышке. Габарит s×s×s, низ в y=0. */
-export function crate(s = 1, wood = 0xb5763d): THREE.Group {
+/** Ящик: картон/доски, скотч крест-накрест, оранжевая наклейка-«ручка» и кант по крышке. Габарит w×h×d, низ в y=0. */
+export function crate(w = 1, wood = 0xb5763d, h = w, d = w): THREE.Group {
   const g = new THREE.Group();
-  g.add(mesh(soft(s, s, s, 0.08), craft('card', wood), 0, s / 2));
+  g.add(mesh(soft(w, h, d, 0.08), craft('card', wood), 0, h / 2));
   const tape = craft('felt', 0xe8d9b0);
-  g.add(mesh(soft(s + 0.02, 0.16, s + 0.02, 0.04), tape, 0, s / 2));
-  g.add(mesh(soft(0.16, s + 0.02, s + 0.02, 0.04), tape, 0, s / 2));
-  g.add(mesh(new THREE.CircleGeometry(0.2 * s, 32), glowing(AFFORDANCE.push, 0.25), 0.26 * s, 0.76 * s, s / 2 + 0.015, false));
-  g.add(rim(AFFORDANCE.push, s * 1.02, s * 1.02, s + 0.02));
+  g.add(mesh(soft(w + 0.02, 0.16, d + 0.02, 0.04), tape, 0, h / 2));
+  g.add(mesh(soft(0.16, h + 0.02, d + 0.02, 0.04), tape, 0, h / 2));
+  const s = Math.min(w, h);
+  g.add(mesh(new THREE.CircleGeometry(0.2 * s, 32), glowing(AFFORDANCE.push, 0.25), 0.26 * w, 0.76 * h, d / 2 + 0.015, false));
+  // Стрелки «толкай» на боках.
+  for (const sx of [-1, 1]) {
+    const arrow = mesh(new THREE.ConeGeometry(0.12 * s, 0.26 * s, 3), glowing(AFFORDANCE.push, 0.35), sx * (w / 2 + 0.015), h / 2, d / 2 - 0.3, false);
+    arrow.rotation.set(0, sx > 0 ? Math.PI / 2 : -Math.PI / 2, Math.PI / 2);
+    g.add(arrow);
+  }
+  g.add(rim(AFFORDANCE.push, w * 1.02, d * 1.02, h + 0.02));
   return g;
 }
 
@@ -163,11 +170,104 @@ export function moat(w: number, d = 3.2, liquid = 0x2fb8d0, lava = false): THREE
   }) as THREE.Group;
 }
 
+/**
+ * Боковой вентилятор (дует вдоль дорожки в сторону +X; для −X группу разворачивают): корпус-«барабан» на ножке,
+ * голубое кольцо, лопасти крутятся вокруг оси X. Высота корпуса size, центр на высоте 0.
+ */
+export function sideFan(size = 1.6): { root: THREE.Group; blades: THREE.Group } {
+  const root = new THREE.Group();
+  const drum = mesh(new THREE.CylinderGeometry(size * 0.5, size * 0.55, 0.5, 32), craft('metal', 0x5a6070));
+  drum.rotation.z = Math.PI / 2;
+  const ring = mesh(new THREE.TorusGeometry(size * 0.48, 0.08, 10, 40), craft('felt', AFFORDANCE.wind), 0.27, 0, 0);
+  ring.rotation.y = Math.PI / 2;
+  const blades = new THREE.Group();
+  blades.position.x = 0.3;
+  for (let i = 0; i < 4; i++) {
+    const b = mesh(new THREE.SphereGeometry(size * 0.21, 16, 8), craft('plain', 0xeef2f6), 0, Math.cos(i * 1.57) * size * 0.21, Math.sin(i * 1.57) * size * 0.21);
+    b.scale.set(0.12, 1, 0.45);
+    b.rotation.x = i * 1.57;
+    blades.add(b);
+  }
+  blades.add(mesh(new THREE.SphereGeometry(0.12, 12, 10), glowing(AFFORDANCE.wind, 0.6), 0.05, 0, 0, false));
+  const leg = mesh(new THREE.CylinderGeometry(0.07, 0.1, size, 10), craft('metal', 0x9aa3b0), -0.1, -size * 0.75, 0);
+  root.add(drum, ring, blades, leg);
+  return { root, blades };
+}
+
+/** Ветровая «чёрточка» — полупрозрачный голубой штрих, летит по потоку. */
+export function windStreak(): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.7, 4, 8), new THREE.MeshBasicMaterial({ color: AFFORDANCE.wind, transparent: true, opacity: 0.55, depthWrite: false }));
+  m.rotation.z = Math.PI / 2;
+  return m;
+}
+
+/** Самострел: каменная голова на столбе с красной щелью, стреляет в сторону −X. Щель — на высоте 0. */
+export function launcher(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(soft(0.8, 0.9, 0.9, 0.14), craft('card', 0x9a8a72), 0.2, 0, 0));
+  g.add(mesh(soft(0.12, 0.16, 0.6, 0.05), glowing(AFFORDANCE.danger, 0.9), -0.22, 0, 0, false));
+  for (const sx of [-1, 1]) g.add(mesh(new THREE.SphereGeometry(0.09, 12, 10), craft('plain', 0x2a2420), -0.15, 0.25, sx * 0.22));
+  g.add(mesh(new THREE.CylinderGeometry(0.08, 0.1, 6, 10), craft('wood', 0x6b4a2a), 0.25, -3.4, 0));
+  return g;
+}
+
+/** Стрела остриём к −X, центр в 0. */
+export function arrowShaft(): THREE.Group {
+  const a = new THREE.Group();
+  const shaft = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 8), craft('wood', 0xb07a40));
+  shaft.rotation.z = Math.PI / 2;
+  const tip = mesh(new THREE.ConeGeometry(0.07, 0.2, 8), craft('metal', 0x9aa0a8), -0.48, 0, 0);
+  tip.rotation.z = Math.PI / 2;
+  a.add(shaft, tip);
+  for (const s of [-1, 1]) {
+    const f = mesh(new THREE.BoxGeometry(0.2, 0.01, 0.12), craft('felt', AFFORDANCE.danger), 0.33, 0, s * 0.05);
+    f.rotation.x = s * 0.6;
+    a.add(f);
+  }
+  return a;
+}
+
+/** Флажок чекпоинта: деревянный шест и фетровый флаг. setActive — флаг становится зелёным и поднимается. */
+export function checkpointFlag(): { root: THREE.Group; setActive(on: boolean): void; update(t: number): void } {
+  const root = new THREE.Group();
+  root.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 2, 10), craft('wood', 0x8a5532), 0, 1, 0));
+  root.add(mesh(new THREE.SphereGeometry(0.09, 12, 10), craft('metal', 0xd8deea), 0, 2.02, 0));
+  root.add(mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.12, 20), craft('felt', 0x6b5a45), 0, 0.06, 0));
+  const flag = new THREE.Group();
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(0.75, -0.22);
+  shape.lineTo(0, -0.45);
+  const off = craft('felt', 0xe9e2d0);
+  const on = craft('felt', 0x4fd17a);
+  const cloth = mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: false }), off, 0.05, 0, 0);
+  flag.add(cloth);
+  flag.position.y = 1.2;
+  root.add(flag);
+  const glow = mesh(new THREE.SphereGeometry(0.1, 12, 10), glowing(0x4fd17a, 2), 0, 2.02, 0, false);
+  glow.visible = false;
+  root.add(glow);
+  let active = false;
+  return {
+    root,
+    setActive(v) {
+      if (v === active) return;
+      active = v;
+      cloth.material = v ? on : off;
+      glow.visible = v;
+    },
+    update(t) {
+      flag.position.y += ((active ? 1.9 : 1.2) - flag.position.y) * 0.08;
+      flag.rotation.y = Math.sin(t * 3 + root.position.x) * 0.25;
+    },
+  };
+}
+
 /** Объект по виду платформы — для platformMesh и витрины. */
 export function buildProp(kind: PropKind, w: number, h: number, d: number, color: number): THREE.Group {
   switch (kind) {
     case 'crate':
-      return crate(Math.min(w, h, d), color);
+      return crate(w, color, h, Math.min(d, 3));
     case 'rope':
       return rope(h, color);
     case 'trampoline':

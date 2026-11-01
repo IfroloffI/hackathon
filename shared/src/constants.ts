@@ -36,6 +36,8 @@ export const PHYSICS = {
   /** Высота прыжка = jumpSpeed² / (2·gravity) ≈ 2.4 — с запасом выше самой высокой ступеньки уровня. */
   jumpSpeed: 11,
   gravity: 25,
+  /** Батут: подброс ≈ bounceSpeed² / (2·gravity) ≈ 5.1 — вдвое выше прыжка. */
+  bounceSpeed: 16,
   /** Допуск на скорость при серверной проверке (лаг, накопление). */
   speedTolerance: 1.6,
 } as const;

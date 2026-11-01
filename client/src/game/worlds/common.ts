@@ -26,7 +26,7 @@ export function platformMesh(p: Platform, fullDepth: number): THREE.Object3D {
     // Верёвка и ров «привязаны» к верху габарита, остальные стоят на его низе.
     prop.position.y = p.kind === 'rope' || p.kind === 'moat' ? p.h / 2 : -p.h / 2;
     g.add(prop);
-    return g;
+    return g
   }
   switch (p.kind) {
     case 'engine':
@@ -150,6 +150,8 @@ const STATION_COLOR: Record<StationKind, number> = {
   return: 0x7dff9a,
   narrator: 0xffe066,
   shop: 0x0077ff,
+  reward: 0xffd23f,
+  reset: 0xff9a1f,
 };
 
 /** Станция «нажми E»: фетровая подушка со стежками на полу + парящая капля-метка цвета станции. */
