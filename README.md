@@ -25,7 +25,7 @@ docker compose logs -f game agent-service
 
 ### Команда в одном сегменте (ZeroTier)
 
-Полный воспроизводимый manual с диагностикой и troubleshooting — [docs/ZEROTIER-SETUP.md](docs/ZEROTIER-SETUP.md). Кратко:
+Полный воспроизводимый manual с диагностикой и troubleshooting — [docs/ZEROTIER-SETUP.md](docs/ZEROTIER-SETUP.md); автофикс сетевого экрана macOS-хоста (pf, LaunchDaemon) — [docs/MAC-HOST-SETUP.md](docs/MAC-HOST-SETUP.md). Кратко:
 
 Если сеть площадки режет P2P между ноутами (типично для веню/корпоративного Wi-Fi: пинг идёт, TCP — нет), поднимаем виртуальный L2-сегмент через ZeroTier:
 

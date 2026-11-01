@@ -66,17 +66,18 @@ sudo zerotier-cli listnetworks   # status: OK, dev: fethXXXX, ips: 10.161.254.5/
 На macOS-хосте мог быть включён pf (System → какое-то security-ПО загружает
 правила «default-deny»): пинги и DNS проходят, **входящий TCP молча дропается**.
 Симптом: страница не грузится, при этом `tcpdump` видит SYN коллеги, а SYN-ACK
-от хоста не рождается.
+от хоста не рождается. Правило лечения runtime-only — security-ПО его
+периодически смывает, поэтому чинить нужно автоматически.
 
-Проверка:
+**Рекомендуемый путь (одна команда, сам чинит при загрузке и раз в 30 с):**
 
 ```bash
-sudo pfctl -s info | head -1                 # Status: Disabled → §3 не нужен
-sudo pfctl -a main -s rules | head -3        # «block drop in log (all) all» → нужен §3
+sudo bash scripts/mac-net.sh --install-daemon
 ```
 
-Лечение (разрешаем входящий из ZT-подсети; правило по подсети переживает
-переименование `feth*` при перезагрузках):
+Подробности и откат — [docs/MAC-HOST-SETUP.md](docs/MAC-HOST-SETUP.md).
+
+Вручную (разово, без демона):
 
 ```bash
 sudo pfctl -a main -s rules 2>/dev/null > /tmp/pf-main.rules   # бэкап текущих правил
