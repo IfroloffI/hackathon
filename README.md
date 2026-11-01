@@ -25,6 +25,8 @@ docker compose logs -f game agent-service
 
 ### Команда в одном сегменте (ZeroTier)
 
+Полный воспроизводимый manual с диагностикой и troubleshooting — [docs/ZEROTIER-SETUP.md](docs/ZEROTIER-SETUP.md). Кратко:
+
 Если сеть площадки режет P2P между ноутами (типично для веню/корпоративного Wi-Fi: пинг идёт, TCP — нет), поднимаем виртуальный L2-сегмент через ZeroTier:
 
 1. Хост: `brew install zerotier-one` → `sudo zerotier-one -d` → `sudo zerotier-cli join <NetworkID>`.
