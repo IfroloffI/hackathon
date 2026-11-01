@@ -15,13 +15,18 @@ if ! command -v openssl >/dev/null 2>&1; then
   exit 1
 fi
 
-# Primary LAN IP — как в scripts/livekit.sh и server/src/net/lan.ts:
-# Wi-Fi/Ethernet (en|eth|wlan|wl) приоритетны, VPN/Docker — в конце.
+# Primary LAN IP — как в server/src/net/lan.ts: ZeroTier-сегмент команды
+# (zt*/feth*) приоритетнее Wi-Fi (веню-сеть режет P2P), затем Wi-Fi/Ethernet.
 detect_ip() {
   if [[ "$(uname -s)" == Darwin ]]; then
-    local ifc
-    ifc="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
-    for i in $ifc en0 en1; do
+    for ifc in $(ifconfig -l 2>/dev/null | tr ' ' '\n' | grep -E '^(zt|feth)'); do
+      local ip
+      ip=$(ifconfig "$ifc" 2>/dev/null | awk '/[[:space:]]inet[[:space:]]/{print $2; exit}')
+      [[ -n "$ip" ]] && { echo "$ip"; return 0; }
+    done
+    local ifc2
+    ifc2="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+    for i in $ifc2 en0 en1; do
       ipconfig getifaddr "$i" 2>/dev/null && return 0
     done
     return 0
@@ -29,13 +34,12 @@ detect_ip() {
   if command -v ip >/dev/null 2>&1; then
     ip -4 -o addr show scope global 2>/dev/null \
       | awk '{
-        name = $2; sub(/@.*/, "", name); split($4, a, "/");
-        if (name ~ /^(en|eth|wlan|wl)/) rank = 0;
-        else if (name ~ /^(utun|tun|tap|docker|br-|veth|singbox|vboxnet|vmnet|bridge|llw|awdl)/) rank = 2;
-        else rank = 1; print rank, a[1];
-      }' | sort -n | head -1 | awk '{print $2}'
-  else
-    hostname -I 2>/dev/null | awk '{print $1}'
+          name = $2; sub(/@.*/, "", name); split($4, a, "/");
+          if (name ~ /^(zt|feth)/) rank = -1;
+          else if (name ~ /^(en|eth|wlan|wl)/) rank = 0;
+          else if (name ~ /^(utun|tun|tap|docker|br-|veth|singbox|vboxnet|vmnet|bridge|llw|awdl)/) rank = 2;
+          else rank = 1; print rank, a[1];
+        }' | sort -n | head -1 | awk '{print $2}'
   fi
 }
 
