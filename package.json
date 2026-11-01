@@ -22,7 +22,8 @@
     "test": "npm test -w shared && npm test -w server && npm test -w agent-service",
     "livekit": "concurrently -k -n livekit,tls -c blue,green \"bash scripts/livekit.sh\" \"node scripts/livekit-tls.mjs\"",
     "up": "bash scripts/up.sh",
-    "down": "docker compose down"
+    "down": "docker compose down",
+    "frontend": "bash scripts/frontend.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

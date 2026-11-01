@@ -23,6 +23,14 @@ docker compose logs -f game agent-service
 
 Первый запуск нужен с интернетом: образы и модель (~2 ГБ), дальше работает офлайн. Порты: 2567 (игра), 7880 (wss LiveKit), 7881/tcp и 50000–50100/udp (медиа), 11434 (Ollama). Поиск публичных комнат по UDP-маякам из контейнера в LAN не работает — входите по коду. На Mac Ollama в Docker идёт без GPU; быстрее нативная: `OLLAMA_URL=http://host.docker.internal:11434 npm run up -- game livekit livekit-tls agent-service`.
 
+### Ветка frontend параллельно
+
+```bash
+npm run frontend   # = scripts/frontend.sh: копия ветки frontend в ../hackathon-frontend (git worktree), сборка, http://localhost:3567
+```
+
+У копии свои `node_modules` и `data/`, поэтому она не мешает этой ветке на :2567. Код для неё правится в `../hackathon-frontend` и коммитится там же, в ветку `frontend`. Порт меняется через `FRONTEND_PORT=4000 npm run frontend`.
+
 ### Без Docker
 
 ```bash
