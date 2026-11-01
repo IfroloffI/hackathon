@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { craft, cutout, glowing, hillsShape, mesh, polyShape, skyTexture, soft, stitchLine } from '../craft.ts';
+import { craft, cutout, glowing, hillsShape, mesh, polyShape, rnd, skyTexture, soft, stitchLine } from '../craft.ts';
 import { landedShip, stars, tint } from './common.ts';
 import { signSprite, type Decor } from './decor.ts';
 
@@ -43,7 +43,7 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
   floor.rotation.x = -Math.PI / 2;
   floor.castShadow = false;
   g.add(floor);
-  for (let x = -40; x <= 110; x += 4.6) {
+  for (let x = -70; x <= 130; x += 4.6) {
     const tuft = new THREE.Group();
     for (let k = 0; k < 3; k++) {
       const b = mesh(new THREE.SphereGeometry(0.7 + ((x * 7 + k) % 5) * 0.1, 20, 14), craft('felt', p.tuft), k * 0.7, 0, 0, false);
@@ -58,6 +58,78 @@ function diorama(g: THREE.Group, scene: THREE.Scene, p: Palette) {
   g.add(cutout(hillsShape(0.4, 0.7, 0.2, 5, 130), p.hills[0], -12, 0.4));
   if (p.night) g.add(stars(1200, 90, 0xfff6dc, 0.35));
   g.add(landedShip(-25));
+  surroundings(g, p);
+}
+
+/** Не ставим кулисы туда, где бегает игрок: дорожка уровня и её края (EPOCH_BOUNDS в shared). */
+const LANE_HALF = 3;
+const LEVEL_MIN_X = -31;
+const LEVEL_MAX_X = 101;
+/** Насколько окрестности тянутся по x — пол и холмы заканчиваются на ±130. */
+const SCATTER = { from: -70, to: 128 };
+
+/**
+ * Окрестности диорамы — то, что открывается, когда камера поворачивается по ходу движения:
+ * низкие кусты и камни-«пуфы» перед дорожкой (ниже линии взгляда), рощицы и валуны за ней,
+ * а за краями уровня — крупные кулисы, чтобы мир не обрывался.
+ */
+function surroundings(g: THREE.Group, p: Palette) {
+  const bush = (x: number, z: number, s: number, color: number) => {
+    const b = new THREE.Group();
+    for (let k = 0; k < 3; k++) {
+      const r = (0.5 + rnd() * 0.35) * s;
+      const ball = mesh(new THREE.SphereGeometry(r, 18, 12), craft('felt', color), (k - 1) * 0.55 * s, r * 0.55, (rnd() - 0.5) * 0.4 * s, false);
+      ball.scale.y = 0.75;
+      b.add(ball);
+    }
+    b.position.set(x, -1.6, z);
+    b.rotation.y = rnd() * Math.PI;
+    return b;
+  };
+  const rock = (x: number, z: number, s: number, color: number) => {
+    const r = mesh(new THREE.DodecahedronGeometry(s, 1), craft('card', color), x, -1.6 + s * 0.45, z);
+    r.scale.set(1.2, 0.7, 1);
+    r.rotation.y = rnd() * Math.PI;
+    return r;
+  };
+  const flower = (x: number, z: number, color: number) => {
+    const f = new THREE.Group();
+    f.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 6), craft('felt', 0x4f9a3c), 0, 0.3, 0, false));
+    f.add(mesh(new THREE.SphereGeometry(0.14, 12, 8), craft('felt', color), 0, 0.62, 0, false));
+    f.position.set(x, -1.6, z);
+    return f;
+  };
+  const petals = [0xffffff, 0xffd36b, 0xff8fa3, 0x9fc7ff];
+
+  // Передний план: низко, чтобы не загораживать игрока (верх ниже y≈-0.3).
+  const span = SCATTER.to - SCATTER.from;
+  for (let i = 0; i < 100; i++) {
+    const x = SCATTER.from + rnd() * span;
+    const z = LANE_HALF + 2 + rnd() * 12;
+    const roll = rnd();
+    if (roll < 0.45) g.add(bush(x, z, 0.6 + rnd() * 0.4, rnd() < 0.5 ? p.tuft : p.hills[0]));
+    else if (roll < 0.7) g.add(rock(x, z, 0.35 + rnd() * 0.35, tint(p.ground, 0.9 + rnd() * 0.3)));
+    else for (let k = 0; k < 3; k++) g.add(flower(x + (rnd() - 0.5) * 1.4, z + (rnd() - 0.5) * 1.4, petals[(i + k) % petals.length]));
+  }
+  // Средний план за дорожкой: кусты покрупнее и валуны.
+  for (let i = 0; i < 56; i++) {
+    const x = SCATTER.from + rnd() * span;
+    const z = -LANE_HALF - 4 - rnd() * 9;
+    if (rnd() < 0.6) g.add(bush(x, z, 1 + rnd() * 0.8, p.hills[Math.floor(rnd() * 3)]));
+    else g.add(rock(x, z, 0.7 + rnd() * 0.8, tint(p.ground, 0.8 + rnd() * 0.3)));
+  }
+  // Кулисы за краями уровня: крупные холмы-подушки поперёк дорожки, чтобы конец мира не был пустым.
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 6; i++) {
+      const x = (side < 0 ? LEVEL_MIN_X : LEVEL_MAX_X) + side * (5 + i * 4 + rnd() * 3);
+      const z = -8 + rnd() * 18;
+      const s = 2.2 + rnd() * 2;
+      const hill = mesh(new THREE.SphereGeometry(s, 28, 18), craft('felt', p.hills[i % 3]), x, -1.6, z);
+      hill.scale.set(1.4, 0.8, 1.1);
+      g.add(hill);
+      g.add(bush(x + side * s, z + s, 1.2, p.tuft));
+    }
+  }
 }
 
 /** Облака-подушки из фетра, медленно плывут. */

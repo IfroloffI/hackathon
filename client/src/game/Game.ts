@@ -26,6 +26,22 @@ const PUSH_SEND_HZ = 10;
 const HAZARD_BUBBLE: Record<string, string> = { arrow: '💥', water: '💦' };
 
 /**
+ * Камера-«операторский кран»: висит на орбите вокруг игрока и поворачивается по ходу движения,
+ * чтобы было видно, куда бежишь. Углы в радианах; скорость — «жёсткость» экспоненциального сглаживания.
+ */
+const CAM = {
+  distance: 15,
+  height: 3.2,
+  /** Поворот, пока бежим, и остаточный поворот в сторону взгляда, когда стоим. */
+  runYaw: 0.42,
+  idleYaw: 0.16,
+  /** Сколько смотреть вперёд по ходу (единицы мира). */
+  lead: 1.4,
+  followSpeed: 4,
+  yawSpeed: 1.8,
+};
+
+/**
  * Игровая сцена комнаты: рендер текущего уровня (корабль или эпоха), локальный игрок,
  * чужие игроки, станции взаимодействия (E). Уровень меняет только сервер — клиент следует за state.levelId.
  */
@@ -33,6 +49,10 @@ export class Game {
   private renderer = new THREE.WebGLRenderer({ antialias: true });
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+  /** Сглаженное состояние камеры: точка, за которой следим, угол орбиты и упреждение. */
+  private camFocus = new THREE.Vector3();
+  private camYaw = 0;
+  private camLead = 0;
   private clock = new THREE.Clock();
   private world?: World;
   private worldLevelId = '';
@@ -203,11 +223,11 @@ export class Game {
       if (state.skin && state.skin !== view.skinId) this.rebuildLocalView();
       this.local.view.setPose(ctrl.x, ctrl.y, ctrl.z, ctrl.facing, ctrl.anim, dt);
       this.sendMove(dt);
-      this.followCamera(ctrl.x, ctrl.y, dt);
+      this.followCamera(ctrl, dt);
       this.updatePrompt(ctrl);
     }
     this.remotes.forEach((r) => r.update(dt));
-    this.world?.update(t, dt, this.camera.position.x);
+    this.world?.update(t, dt, this.camFocus.x);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -273,17 +293,34 @@ export class Game {
     this.room.send(ClientMsg.Move, snap);
   }
 
-  private followCamera(x: number, y: number, dt: number) {
-    const k = 1 - Math.exp(-dt * 4);
-    this.camera.position.x += (x - this.camera.position.x) * k;
-    this.camera.position.y += (y + 3.2 - this.camera.position.y) * k;
-    this.camera.position.z = 15;
-    this.camera.lookAt(this.camera.position.x, this.camera.position.y - 1.6, 0);
+  /** Плавно разворачиваем камеру в сторону движения: и угол, и точка обзора догоняют цель со своей скоростью. */
+  private followCamera(ctrl: LocalController, dt: number) {
+    const running = ctrl.vx !== 0;
+    const targetYaw = ctrl.facing * (running ? CAM.runYaw : CAM.idleYaw);
+    const targetLead = running ? ctrl.facing * CAM.lead : 0;
+    const k = 1 - Math.exp(-dt * CAM.followSpeed);
+    const ky = 1 - Math.exp(-dt * CAM.yawSpeed);
+    this.camYaw += (targetYaw - this.camYaw) * ky;
+    this.camLead += (targetLead - this.camLead) * ky;
+    this.camFocus.x += (ctrl.x + this.camLead - this.camFocus.x) * k;
+    this.camFocus.y += (ctrl.y - this.camFocus.y) * k;
+    this.placeCamera();
+  }
+
+  /** Камера на орбите радиуса CAM.distance вокруг camFocus; положительный yaw — смотрим вправо (+x). */
+  private placeCamera() {
+    const { x, y } = this.camFocus;
+    this.camera.position.set(x - Math.sin(this.camYaw) * CAM.distance, y + CAM.height, Math.cos(this.camYaw) * CAM.distance);
+    this.camera.lookAt(x, y + CAM.height - 1.6, 0);
   }
 
   private snapCamera() {
     if (!this.local) return;
-    this.camera.position.set(this.local.ctrl.x, this.local.ctrl.y + 3.2, 15);
+    const { ctrl } = this.local;
+    this.camYaw = ctrl.facing * CAM.idleYaw;
+    this.camLead = 0;
+    this.camFocus.set(ctrl.x, ctrl.y, 0);
+    this.placeCamera();
   }
 
   private onResize = () => {

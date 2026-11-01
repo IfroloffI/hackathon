@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Level, Platform, Station, StationKind } from '@chronolet/shared';
-import { craft, craftSlab, glowing, mesh, soft, stitchLine, stitchRing, type CraftKind } from '../craft.ts';
+import { craft, craftSlab, glowing, mesh, rnd, soft, stitchLine, stitchRing, type CraftKind } from '../craft.ts';
 import { buildProp, type PropKind } from './props.ts';
 
 export { mesh };
@@ -184,6 +184,20 @@ export function stars(count: number, radius: number, color = 0xffffff, size = 0.
     const a = Math.random() * Math.PI * 2;
     const r = radius * (0.85 + Math.random() * 0.15);
     pos.set([r * Math.sqrt(1 - u * u) * Math.cos(a), Math.abs(r * u) * 0.8 + 2, -Math.abs(r * Math.sqrt(1 - u * u) * Math.sin(a)) - 15], i * 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return new THREE.Points(geo, new THREE.PointsMaterial({ color, size, sizeAttenuation: true, fog: false }));
+}
+
+/** Звёзды во все стороны (сфера вокруг уровня) — камера поворачивается, и пустых краёв быть не должно. */
+export function starSphere(count: number, radius: number, color = 0xffffff, size = 0.35): THREE.Points {
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const u = rnd() * 2 - 1;
+    const a = rnd() * Math.PI * 2;
+    const r = radius * (0.8 + rnd() * 0.2);
+    pos.set([r * Math.sqrt(1 - u * u) * Math.cos(a), r * u + 4, r * Math.sqrt(1 - u * u) * Math.sin(a)], i * 3);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
