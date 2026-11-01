@@ -1,12 +1,14 @@
-# LLM для NPC «Хронолёта»: Ollama (qwen2.5:3b) + agent-service (контракт chronolet.llm/1).
-# Игровой сервер работает на хосте: npm run build && npm start (порт 2567).
+# Весь «Колизиум» одной командой: игра + LiveKit (голос) + Ollama и agent-service (реплики NPC).
 #
-#   docker compose up -d           # первый раз — с интернетом: скачает образ и модель (~2 ГБ)
-#   docker compose logs -f agent-service
-#   docker compose stop ollama     # игра продолжит работать на заготовках
+#   npm run up        # = scripts/up.sh: LAN-IP для голоса, dev-сертификат, docker compose up -d --build
+#   npm run down      # остановить всё
+#   docker compose logs -f game agent-service
 #
-# На Mac Docker не использует GPU (Metal): быстрее нативная Ollama (`brew install ollama`,
-# `ollama serve`, `ollama pull qwen2.5:3b`) и OLLAMA_URL=http://host.docker.internal:11434 docker compose up -d agent-service
+# Первый запуск — с интернетом: образы и модель (~2 ГБ). Дальше работает офлайн.
+# Игра: https://<хост>:2567 (самоподписанный сертификат — браузер попросит подтвердить один раз).
+# Без LLM: docker compose stop ollama agent-service — игра продолжит на заготовках.
+# На Mac Docker не использует GPU (Metal): быстрее нативная Ollama (`ollama serve`) и
+#   OLLAMA_URL=http://host.docker.internal:11434 npm run up -- game livekit livekit-tls agent-service
 services:
   ollama:
     image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
@@ -44,14 +46,71 @@ services:
     depends_on:
       ollama-pull:
         condition: service_completed_successfully
+      game:
+        condition: service_healthy
     environment:
-      SERVER_URL: ${SERVER_URL:-http://host.docker.internal:2567}
+      # Внутри сети compose; сертификат игры самоподписанный — проверку TLS для этого адреса отключаем.
+      SERVER_URL: ${SERVER_URL:-https://game:2567}
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
       LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
     # Linux: host.docker.internal → хост (на Mac/Windows работает и так).
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+  # Игра: сервер + собранный клиент на одном порту. БД и временные ряды — в ./data на хосте.
+  game:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - '2567:2567'
+    volumes:
+      - ./data:/app/data
+      - ./livekit/certs:/app/livekit/certs:ro
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}
+      # Пусто — адрес строится из хоста страницы: wss://<хост>:7880.
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
+      CHRONOLET_SOLO: ${CHRONOLET_SOLO:-0}
+    healthcheck:
+      test: ['CMD', 'node', '-e', "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';fetch('https://127.0.0.1:2567/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Голос. Медиа (UDP 50000-50100, TCP 7881) — напрямую; LIVEKIT_NODE_IP — LAN-IP хоста для ICE.
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    command: ['--config', '/etc/livekit.yaml', '--node-ip', '${LIVEKIT_NODE_IP:-127.0.0.1}']
+    environment:
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-chronolet-dev-secret-please-change-01}'
+    ports:
+      - '7881:7881'
+      - '50000-50100:50000-50100/udp'
+    volumes:
+      - ./livekit/livekit.docker.yaml:/etc/livekit.yaml:ro
+    restart: unless-stopped
+
+  # wss://<хост>:7880 → livekit:17880. Без TLS браузеры на https-странице режут ws:// как mixed content.
+  livekit-tls:
+    image: node:22-alpine
+    command: ['node', '/app/scripts/livekit-tls.mjs']
+    depends_on:
+      - livekit
+    environment:
+      LIVEKIT_SIGNAL_HOST: livekit
+      LIVEKIT_SIGNAL_PORT: '17880'
+    ports:
+      - '7880:7880'
+    volumes:
+      - ./scripts/livekit-tls.mjs:/app/scripts/livekit-tls.mjs:ro
+      - ./livekit/certs:/app/livekit/certs:ro
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+data
+docs
+.git
+.cache
+*.log
+livekit/certs
+health
+host

@@ -1,0 +1,15 @@
+# LiveKit в общем docker-compose (корень репозитория).
+# Сигналинг внутри сети compose на livekit:17880, снаружи — wss://<хост>:7880 через livekit-tls.
+# Ключи — из переменной LIVEKIT_KEYS (compose берёт их из LIVEKIT_API_KEY/LIVEKIT_API_SECRET),
+# IP для ICE-кандидатов — --node-ip (scripts/up.sh подставляет LAN-адрес хоста).
+port: 17880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  # UDP-диапазон для медиа. 100 портов хватает на 6 игроков; проброшены 1:1 в compose.
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+logging:
+  level: info
