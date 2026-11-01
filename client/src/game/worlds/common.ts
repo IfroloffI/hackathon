@@ -157,7 +157,7 @@ const STATION_COLOR: Record<StationKind, number> = {
 /** Станция «нажми E»: фетровая подушка со стежками на полу + парящая капля-метка цвета станции. */
 export function stationMarker(s: Station): THREE.Object3D {
   const g = new THREE.Group();
-  g.position.set(s.x, s.y + 0.02, 0.4);
+  g.position.set(s.x, s.y + 0.02, (s.z ?? 0) + 0.4);
   const c = STATION_COLOR[s.kind];
   const pad = mesh(new THREE.CylinderGeometry(0.75, 0.8, 0.08, 40), craft('felt', c), 0, 0.04, 0, false);
   const ring = stitchRing(0.62);
@@ -207,7 +207,7 @@ export function starSphere(count: number, radius: number, color = 0xffffff, size
 /** Приземлившийся Колизиум в эпохе — плюшевый кораблик-капсула, к нему возвращаются за прыжком. */
 export function landedShip(x: number): THREE.Object3D {
   const g = new THREE.Group();
-  g.position.set(x, 0, -2.6);
+  g.position.set(x, 0, -8);
   const hull = mesh(new THREE.CapsuleGeometry(1.1, 2.6, 12, 32), craft('felt', 0xeef2f8), 0, 1.6);
   hull.rotation.z = Math.PI / 2;
   const cockpit = mesh(new THREE.SphereGeometry(0.7, 24, 16), glowing(0x7fd8ff, 0.6), 1.4, 2.1, 0.4);

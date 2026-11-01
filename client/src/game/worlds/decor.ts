@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { badgeTexture } from '../craft.ts';
 
 export interface Decor {
-  update?(t: number): void;
+  /** t — время; focusX и yaw — сглаженные позиция и угол камеры: задники поворачиваются за ней. */
+  update?(t: number, focusX: number, yaw: number): void;
   setParts?(parts: string[]): void;
 }
 

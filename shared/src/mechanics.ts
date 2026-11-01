@@ -81,9 +81,9 @@ const mod = (a: number, n: number) => ((a % n) + n) % n;
 
 // ───────────────────────── ящики
 
-/** Ящик как твёрдая платформа (на всю глубину дорожки). */
+/** Ящик как твёрдая платформа: ограничен дорожкой (z 0, d 3.2) — в ветки его не утащить. */
 export function cratePlatform(def: CrateDef, pos: { x: number; y: number }): Platform {
-  return { x: pos.x, y: pos.y + def.s / 2, w: def.s, h: def.s, color: def.color ?? 0xb5763d, kind: 'crate' };
+  return { x: pos.x, y: pos.y + def.s / 2, w: def.s, h: def.s, z: 0, d: 3.2, color: def.color ?? 0xb5763d, kind: 'crate' };
 }
 
 /** Уровень, где ящики стоят в данных позициях (для физики игрока и тестов). Без ящиков — тот же объект. */

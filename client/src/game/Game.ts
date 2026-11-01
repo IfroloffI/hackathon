@@ -26,19 +26,24 @@ const PUSH_SEND_HZ = 10;
 const HAZARD_BUBBLE: Record<string, string> = { arrow: '💥', water: '💦' };
 
 /**
- * Камера-«операторский кран»: висит на орбите вокруг игрока и поворачивается по ходу движения,
+ * Камера-«операторский кран»: висит на орбите вокруг игрока и живо поворачивается по ходу движения,
  * чтобы было видно, куда бежишь. Углы в радианах; скорость — «жёсткость» экспоненциального сглаживания.
+ * Развороты сопровождаются лёгким креном, как у камеры на кране, качнувшейся в сторону движения.
  */
 const CAM = {
   distance: 15,
   height: 3.2,
   /** Поворот, пока бежим, и остаточный поворот в сторону взгляда, когда стоим. */
-  runYaw: 0.42,
-  idleYaw: 0.16,
+  runYaw: 0.9,
+  idleYaw: 0.32,
   /** Сколько смотреть вперёд по ходу (единицы мира). */
-  lead: 1.4,
-  followSpeed: 4,
-  yawSpeed: 1.8,
+  lead: 2,
+  followSpeed: 4.5,
+  yawSpeed: 2.4,
+  /** Крен: коэффициент от скорости поворота, предел и скорость возврата в горизонт. */
+  roll: 0.03,
+  rollMax: 0.12,
+  rollSpeed: 4,
 };
 
 /**
@@ -49,10 +54,11 @@ export class Game {
   private renderer = new THREE.WebGLRenderer({ antialias: true });
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
-  /** Сглаженное состояние камеры: точка, за которой следим, угол орбиты и упреждение. */
+  /** Сглаженное состояние камеры: точка, за которой следим, угол орбиты, упреждение и крен. */
   private camFocus = new THREE.Vector3();
   private camYaw = 0;
   private camLead = 0;
+  private camRoll = 0;
   private clock = new THREE.Clock();
   private world?: World;
   private worldLevelId = '';
@@ -227,7 +233,7 @@ export class Game {
       this.updatePrompt(ctrl);
     }
     this.remotes.forEach((r) => r.update(dt));
-    this.world?.update(t, dt, this.camFocus.x);
+    this.world?.update(t, dt, this.camFocus.x, this.camYaw);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -293,25 +299,33 @@ export class Game {
     this.room.send(ClientMsg.Move, snap);
   }
 
-  /** Плавно разворачиваем камеру в сторону движения: и угол, и точка обзора догоняют цель со своей скоростью. */
+  /** Живой поворот в сторону движения: угол, точка обзора и крен догоняют свои цели со своей скоростью. */
   private followCamera(ctrl: LocalController, dt: number) {
     const running = ctrl.vx !== 0;
     const targetYaw = ctrl.facing * (running ? CAM.runYaw : CAM.idleYaw);
     const targetLead = running ? ctrl.facing * CAM.lead : 0;
     const k = 1 - Math.exp(-dt * CAM.followSpeed);
     const ky = 1 - Math.exp(-dt * CAM.yawSpeed);
+    const prevYaw = this.camYaw;
     this.camYaw += (targetYaw - this.camYaw) * ky;
     this.camLead += (targetLead - this.camLead) * ky;
+    // Крен от скорости поворота: чем резче машём камерой, тем сильнее она наклоняется.
+    const yawVel = (this.camYaw - prevYaw) / Math.max(dt, 1e-3);
+    const targetRoll = THREE.MathUtils.clamp(yawVel * CAM.roll, -CAM.rollMax, CAM.rollMax);
+    this.camRoll += (targetRoll - this.camRoll) * (1 - Math.exp(-dt * CAM.rollSpeed));
     this.camFocus.x += (ctrl.x + this.camLead - this.camFocus.x) * k;
     this.camFocus.y += (ctrl.y - this.camFocus.y) * k;
+    // За глубиной камера идёт лишь на 3/4, чтобы ветки остались на экране.
+    this.camFocus.z += (ctrl.z * 0.75 - this.camFocus.z) * k;
     this.placeCamera();
   }
 
   /** Камера на орбите радиуса CAM.distance вокруг camFocus; положительный yaw — смотрим вправо (+x). */
   private placeCamera() {
-    const { x, y } = this.camFocus;
-    this.camera.position.set(x - Math.sin(this.camYaw) * CAM.distance, y + CAM.height, Math.cos(this.camYaw) * CAM.distance);
-    this.camera.lookAt(x, y + CAM.height - 1.6, 0);
+    const { x, y, z } = this.camFocus;
+    this.camera.position.set(x - Math.sin(this.camYaw) * CAM.distance, y + CAM.height, z + Math.cos(this.camYaw) * CAM.distance);
+    this.camera.lookAt(x, y + CAM.height - 1.6, z);
+    this.camera.rotateZ(-this.camRoll);
   }
 
   private snapCamera() {
@@ -319,7 +333,8 @@ export class Game {
     const { ctrl } = this.local;
     this.camYaw = ctrl.facing * CAM.idleYaw;
     this.camLead = 0;
-    this.camFocus.set(ctrl.x, ctrl.y, 0);
+    this.camRoll = 0;
+    this.camFocus.set(ctrl.x, ctrl.y, ctrl.z * 0.75);
     this.placeCamera();
   }
 
