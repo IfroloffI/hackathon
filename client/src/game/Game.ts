@@ -14,6 +14,7 @@ import {
   type TeleportPayload,
 } from '@chronolet/shared';
 import { net, type CrewRoom, type NetPlayer } from '../net/connection.ts';
+import { music } from './music.ts';
 import { buildWorld, type World } from './worlds/index.ts';
 import { Character } from './Character.ts';
 import { LocalController } from './LocalController.ts';
@@ -134,6 +135,7 @@ export class Game {
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
     removeEventListener('keydown', this.onKeyDown);
+    music.stop();
     this.unbind.forEach((u) => u());
     this.remotes.forEach((r) => r.dispose());
     this.local?.ctrl.dispose();
@@ -150,6 +152,7 @@ export class Game {
     this.world?.dispose();
     this.worldLevelId = levelId;
     this.world = buildWorld(this.scene, getLevel(levelId));
+    music.play(levelId);
     this.world.setParts([...this.room.state.parts]);
     this.world.hideCoins(this.room.state.coinsTaken ?? []);
     // Пакет телепорта мог прийти раньше патча state — уровень контроллера синхронизируем и здесь.
