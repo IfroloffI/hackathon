@@ -23,6 +23,9 @@ import {
   colorForName,
   epochByLevel,
   getLevel,
+  gateBlockX,
+  PLAYER_SIZE,
+  type GateDef,
   getSkin,
   isNearStation,
   levelFromXp,
@@ -69,6 +72,7 @@ import { llmHub } from '../llm/hub.ts';
 import { createPuzzle, type ActionResult, type Puzzle } from '../puzzles/index.ts';
 import { NARRATOR_LINES, SHIP_AI_EVENTS } from '../agents/lines.ts';
 import { nextLine } from '../agents/memory.ts';
+import { classifyAnswer, gateNpcs } from '../agents/answerClassifier.ts';
 import { config } from '../config.ts';
 import { verifyToken } from '../auth/tokens.ts';
 
@@ -104,6 +108,8 @@ const IDLE_AFTER_MS = 30_000;
 const LIKE_COOLDOWN_MS = 15_000;
 const EMOTE_COOLDOWN_MS = 800;
 const CRATE_TICK_MS = 33;
+/** Через сколько после входа в эпоху NPC у закрытых ворот сам задаёт вопрос (после реплики ХРОНОСа). */
+const GATE_QUESTION_DELAY_MS = 3500;
 
 function normalizeName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim().slice(0, 20) : '';
@@ -145,6 +151,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
    * Сработал таймер — звучит заготовка, а поздний ответ LLM получит 409 late (один голос).
    */
   private pendingReplies = new Map<number, PendingReply>();
+  /** Комната закрыта — асинхронные ответы (answer-classifier) уже некому слать. */
+  private disposing = false;
   private likeCooldown = new Map<string, number>();
   private emoteCooldown = new Map<string, number>();
   private viewTimer?: ReturnType<typeof setTimeout>;
@@ -294,6 +302,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   }
 
   onDispose() {
+    this.disposing = true;
     this.persistPositions();
     clearTimeout(this.viewTimer);
     for (const a of this.pendingReplies.values()) clearTimeout(a.timer);
@@ -355,7 +364,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const fell = typeof rawY === 'number' && rawY < this.level.bounds.minY;
     const fellAt = p.x;
     const now = Date.now();
-    const move = sanitizeMove(msg, p, now - data.lastMoveAt, this.level);
+    const gate = this.closedGate();
+    const move = sanitizeMove(msg, p, now - data.lastMoveAt, this.level, gate ? gateBlockX(gate, PLAYER_SIZE.w / 2) : null);
     data.lastMoveAt = now;
     if (!move) return;
 
@@ -413,13 +423,63 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     const { name } = client.userData;
     this.broadcast(ServerMsg.Chat, { from: client.sessionId, name, text, ts: Date.now() } satisfies ChatBroadcast);
     this.emit('chat', client.sessionId, { text });
-    // «@Галилей почему…» — вопрос агенту.
+    // Ворота закрыты — каждое сообщение в чат считается ответом NPC у ворот
+    // (можно и «@Эратосфен Архимед»). Решает answer-classifier, не LLM.
+    const gate = this.closedGate();
     const m = /^@(\S+)\s*(.*)$/s.exec(text);
-    if (m) {
-      const who = m[1].toLowerCase().replace(/[,:]$/, '');
-      const agent = AGENT_PROFILES.find((a) => a.name.toLowerCase() === who || a.id === who);
-      if (agent) this.ask(client, agent.id, m[2]);
+    const who = m?.[1].toLowerCase().replace(/[,:]$/, '');
+    const agent = who ? AGENT_PROFILES.find((a) => a.name.toLowerCase() === who || a.id === who) : undefined;
+    if (gate && (!m || agent?.id === gate.agent)) {
+      const answer = (agent ? m![2] : text).trim();
+      if (answer) void this.gateAnswer(client, answer);
+      else void this.askGateQuestion(null);
+      return;
     }
+    // «@Галилей почему…» — вопрос агенту.
+    if (agent) this.ask(client, agent.id, m![2]);
+  }
+
+  // ───────────────────────── ворота у входа в эпоху (answer-classifier)
+
+  /** Ворота текущего уровня, если они есть и ещё закрыты. */
+  private closedGate(): GateDef | null {
+    const gate = this.level.gate;
+    return gate && !this.state.gatesOpen.includes(this.level.id) ? gate : null;
+  }
+
+  /** NPC у ворот задаёт свой вопрос (всем или одному). Нет сервиса — ворота открываются сами. */
+  private async askGateQuestion(target: CrewClient | null) {
+    const gate = this.closedGate();
+    if (!gate) return;
+    const npc = (await gateNpcs())?.[gate.agent];
+    if (this.disposing || this.closedGate() !== gate) return;
+    if (!npc) return this.openGate(gate, null, 'Ворота открыты: судья ответов (answer-classifier) недоступен');
+    this.sayTo(target, gate.agent, npc.question, 'script');
+  }
+
+  /** Ответ игрока на вопрос у ворот: модель решает, NPC всем отвечает «да»/«нет». */
+  private async gateAnswer(client: CrewClient, answer: string) {
+    const gate = this.closedGate();
+    if (!gate) return;
+    const [npc, verdict] = await Promise.all([gateNpcs(), classifyAnswer(gate.agent, answer)]);
+    // Пока ждали — ворота уже открыл другой ответ, или экипаж сменил уровень.
+    if (this.disposing || this.closedGate() !== gate) return;
+    const lines = npc?.[gate.agent];
+    if (!lines || !verdict) {
+      client.send(ServerMsg.System, { text: 'Ворота не отвечают: сервис answer-classifier недоступен' });
+      return;
+    }
+    this.emit('gate.answer', client.sessionId, { agentId: gate.agent, text: answer, accepted: verdict.accepted, probability: verdict.probability });
+    this.sayTo(null, gate.agent, verdict.accepted ? lines.accept : lines.reject, 'script');
+    if (verdict.accepted) this.openGate(gate, client, `${client.userData?.name ?? 'Кто-то'} ответил верно — ворота открыты!`);
+  }
+
+  private openGate(gate: GateDef, by: CrewClient | null, text: string) {
+    if (this.closedGate() !== gate) return;
+    this.state.gatesOpen.push(this.level.id);
+    this.broadcast(ServerMsg.System, { text });
+    this.emit('gate.open', by?.sessionId ?? null, { agentId: gate.agent });
+    this.advance(this.scenario.update(this.facts()));
   }
 
   // ───────────────────────── VK Coin, магазин, лайки, эмоции
@@ -643,6 +703,8 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     switch (station.kind) {
       case 'narrator': {
         const agent = station.agent ?? SHIP_AI.id;
+        // Пока ворота закрыты, хозяин ворот только повторяет вопрос — брифинг после ответа.
+        if (this.closedGate()?.agent === agent) return void this.askGateQuestion(client);
         this.ask(client, agent, '');
         this.advance(this.scenario.talkedTo(agent, this.facts()));
         return;
@@ -852,9 +914,21 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     void this.setMetadata({ ...this.metadata, epoch: this.state.epoch });
     sessions.setProgress(this.roomId, this.state.epoch, [...this.state.parts]);
     this.emit('level.enter', null, { levelId, epoch: this.state.epoch });
+    if (this.level.gate && !config.answerClassifier.enabled && !this.state.gatesOpen.includes(levelId)) {
+      this.state.gatesOpen.push(levelId); // ворота выключены (ANSWER_CLASSIFIER_ENABLED=0) — как раньше
+    }
+    // Ворота уже открыты (вернулись в эпоху) или выключены — шаг «Ворота» пропускаем молча: без бонуса и реплик.
+    this.scenario.update(this.facts());
     this.syncScenario();
     const cue = this.scenario.step?.cue;
     if (cue) this.shipSay(cue);
+    // NPC у закрытых ворот задаёт вопрос сам — чуть после реплики ХРОНОСа о прибытии.
+    if (this.closedGate()) {
+      const at = this.level;
+      setTimeout(() => {
+        if (this.level === at) void this.askGateQuestion(null);
+      }, GATE_QUESTION_DELAY_MS);
+    }
     llmHub.pushSnapshot(this.roomId);
   }
 
@@ -868,6 +942,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
   private facts(): ScenarioFacts {
     const pz = this.state.puzzle;
     return {
+      gateOpen: !this.closedGate(),
       rolesFilled: !!pz.observer && !!pz.mechanic,
       stagesPassed: this.puzzle?.stagesPassed ?? 0,
       solved: !!this.puzzle?.solved,

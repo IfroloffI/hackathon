@@ -15,6 +15,8 @@ export function sanitizeMove(
   prev: { x: number; y: number; z: number },
   dtMs: number,
   level: Level,
+  /** Закрытые ворота: правее этого x стоять нельзя (кто уже за ними — не трогаем). */
+  blockX: number | null = null,
 ): Omit<MovePayload, 'levelId'> | null {
   if (!msg || typeof msg !== 'object') return null;
   const m = msg as Record<string, unknown>;
@@ -32,8 +34,11 @@ export function sanitizeMove(
     return { ...respawnPoint(level, prev.x), vx: 0, vy: 0, anim: 'idle', facing: 1 };
   }
 
+  let x = clamp(clamp(m.x as number, prev.x - maxH, prev.x + maxH), bounds.minX, bounds.maxX);
+  if (blockX !== null && prev.x <= blockX + 0.05) x = Math.min(x, blockX);
+
   return {
-    x: clamp(clamp(m.x as number, prev.x - maxH, prev.x + maxH), bounds.minX, bounds.maxX),
+    x,
     y: clamp(m.y as number, prev.y - maxV, prev.y + maxV),
     z: clamp(clamp(m.z as number, prev.z - maxD, prev.z + maxD), bounds.minZ, bounds.maxZ),
     vx: clamp(m.vx as number, -PHYSICS.runSpeed * 2, PHYSICS.runSpeed * 2),

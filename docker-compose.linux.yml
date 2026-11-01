@@ -1,5 +1,5 @@
 # Linux-хост: расшифровка в host network.
-#   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d transcriber
+#   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d transcriber answer-classifier
 #
 # Зачем: на Linux LiveKit (127.0.0.1:17880) из docker-моста не виден, а трафик хост → мост
 # ломают VPN-туннели (TUN с fwmark-правилами). В host network все три сервиса слушают
@@ -26,3 +26,10 @@ services:
       LIVEKIT_URL: ${TRANSCRIBER_LIVEKIT_URL:-ws://127.0.0.1:17880}
       WHISPER_URL: http://127.0.0.1:8770
       REDIS_URL: redis://127.0.0.1:6380/0
+
+  answer-classifier:
+    network_mode: host
+    ports: !reset []
+    command: ['uvicorn', 'server:app', '--host', '127.0.0.1', '--port', '8780']
+    environment:
+      PORT: '8780'

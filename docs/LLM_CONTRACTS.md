@@ -73,6 +73,8 @@
 | `agent.ask` | `agentId, text` | **игрок спросил агента — ответьте в течение 3 с** (`text` пустой = подошёл поговорить) |
 | `agent.say` | `agentId, text, source, to` | история реплик |
 | `chat` | `text` | контекст разговора экипажа |
+| `gate.answer` | `agentId, text, accepted, probability` | ответ на вопрос у ворот эпохи (решает answer-classifier, не LLM) |
+| `gate.open` | `agentId` | ворота у входа открылись — можно поздравить экипаж |
 | `coin.pickup`, `fall`, `idle`, `like`, `emote`, `xp`, `achievement`, `shop.buy` | см. `server/src/rooms/CrewRoom.ts` | повод для ехидных комментариев ХРОНОСа |
 | `finale` | `parts` | финальная речь |
 

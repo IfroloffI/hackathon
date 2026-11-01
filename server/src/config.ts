@@ -57,6 +57,12 @@ export const config = {
     certPath: process.env.TLS_CERT ?? path.join(root, 'livekit', 'certs', 'dev-cert.pem'),
     keyPath: process.env.TLS_KEY ?? path.join(root, 'livekit', 'certs', 'dev-key.pem'),
   },
+  /** Классификатор ответов на вопросы-ворота NPC (answer-classifier/, docker compose). */
+  answerClassifier: {
+    enabled: process.env.ANSWER_CLASSIFIER_ENABLED !== '0',
+    url: (process.env.ANSWER_CLASSIFIER_URL ?? 'http://127.0.0.1:8780').replace(/\/$/, ''),
+    timeoutMs: Number(process.env.ANSWER_CLASSIFIER_TIMEOUT_MS ?? 2000),
+  },
   ollama: {
     enabled: process.env.OLLAMA_ENABLED === '1',
     url: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',

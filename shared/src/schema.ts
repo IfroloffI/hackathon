@@ -92,6 +92,8 @@ export const CrewState = schema(
     players: t.map(PlayerState),
     /** Ящики текущего уровня, ключ — id ящика из Level.crates. */
     crates: t.map(CrateState),
+    /** levelId эпох, где ворота у входа уже открыты (экипаж ответил NPC). */
+    gatesOpen: t.array('string'),
   },
   'CrewState',
 );

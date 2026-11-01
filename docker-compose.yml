@@ -115,6 +115,24 @@ services:
       - 'host.docker.internal:host-gateway'
     restart: unless-stopped
 
+  # ---------- Вопросы-ворота NPC (answer-classifier/README.md) ----------
+  # 5 логрегов на bag of words (по одному на NPC), обучаются при сборке образа.
+  # Игровой сервер ходит на http://127.0.0.1:8780 (ANSWER_CLASSIFIER_URL).
+  #   macOS:  docker compose up -d answer-classifier
+  #   Linux:  docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d answer-classifier
+  answer-classifier:
+    build: ./answer-classifier
+    ports:
+      - '127.0.0.1:8780:8000'
+    environment:
+      ACCEPT_THRESHOLD: ${ACCEPT_THRESHOLD:-0.5}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:%s/health" % os.environ.get("PORT", "8000"))']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
 volumes:
   ollama:
   whisper-models:

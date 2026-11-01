@@ -25,6 +25,8 @@ export type GameEventType =
   | 'chat'
   | 'agent.ask'
   | 'agent.say'
+  | 'gate.answer'
+  | 'gate.open'
   | 'hint'
   | 'achievement'
   | 'xp'
