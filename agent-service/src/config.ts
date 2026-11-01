@@ -14,10 +14,10 @@ export const config = {
   proactiveGapMs: Number(process.env.PROACTIVE_GAP_MS ?? 10000),
   /** Redis с расшифровками голоса (transcriber): поток transcripts:live и история transcripts:room:<id>. */
   redisUrl: process.env.REDIS_URL ?? 'redis://127.0.0.1:6380/0',
-  /** Как часто NPC комментирует разговор экипажа (если было что сказать вслух), мс. */
-  commentGapMs: Number(process.env.COMMENT_GAP_MS ?? 45000),
-  /** Сколько новых фраз нужно, чтобы был повод для комментария. */
-  commentMinPhrases: Number(process.env.COMMENT_MIN_PHRASES ?? 2),
-  /** Не встревать, если кто-то из NPC говорил совсем недавно, мс. */
-  commentQuietMs: Number(process.env.COMMENT_QUIET_MS ?? 10000),
+  /** Как часто NPC сам говорит: отвечает на сказанное вслух или комментирует прогресс, мс. */
+  commentGapMs: Number(process.env.COMMENT_GAP_MS ?? 10000),
+  /** Сколько новых фраз нужно для реплики (0 — говорить и без новых фраз, о прогрессе). */
+  commentMinPhrases: Number(process.env.COMMENT_MIN_PHRASES ?? 0),
+  /** Не перебивать: после любой реплики NPC (например, подсказки по E) подождать, мс. */
+  commentQuietMs: Number(process.env.COMMENT_QUIET_MS ?? 7000),
 };

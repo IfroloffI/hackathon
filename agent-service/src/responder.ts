@@ -1,7 +1,7 @@
-import { ASK_TIMEOUT_MS, EPOCHS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
+import { ASK_TIMEOUT_MS, EPOCHS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, getLevel, guideFor, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
 import { config } from './config.ts';
 import { api } from './api.ts';
-import { allSessions, ctx, saidBy, situation, speechLines, type SessionContext } from './context.ts';
+import { allSessions, ctx, markAnswered, saidBy, situation, speechLines, tooSimilar, type SessionContext } from './context.ts';
 import { buildMessages, cleanReply, keepsNumbers } from './prompt.ts';
 import { health, streamChat } from './ollama.ts';
 import { TaskQueue } from './queue.ts';
@@ -23,6 +23,7 @@ export interface Agents {
 export function onEvent(e: GameEvent, agents: Agents) {
   const d = e.data as Partial<ReplyableData> & { text?: string; attempts?: number; message?: string | null; part?: string | null; seconds?: number };
   const c = ctx(e.session);
+
 
   if (e.type === 'agent.ask' && d.replyable) {
     const agent = agents.get(d.agentId!);
@@ -74,13 +75,17 @@ export function onEvent(e: GameEvent, agents: Agents) {
 export function maybeComment(agents: Agents, now = Date.now()) {
   if (!health.ok) return;
   for (const [session, c] of allSessions()) {
-    if (!c.snapshot || c.speechSinceComment < config.commentMinPhrases) continue;
+    if (!c.snapshot || c.speechSinceComment < config.commentMinPhrases || !c.snapshot.crew.some((m) => m.connected)) continue;
     if (now - c.lastCommentAt < config.commentGapMs || now - c.lastAnySpeechAt < config.commentQuietMs) continue;
     const agent = commentator(c, agents);
     if (!agent) continue;
     c.lastCommentAt = now;
-    c.speechSinceComment = 0;
+    const heard = c.speechSinceComment > 0;
+    // Только неотвеченные фразы: на уже прокомментированное второй раз не реагируем.
+    const speech = heard ? speechLines(c, now, 4 * 60_000, c.answeredUpTo) : [];
+    markAnswered(c);
     c.comments++;
+    const said = saidBy(c, agent.id);
     const e = {
       seq: 0,
       ts: now,
@@ -92,14 +97,37 @@ export function maybeComment(agents: Agents, now = Date.now()) {
       player: null,
       data: {},
     } as unknown as GameEvent;
-    enqueue(e, 3, 15000, {
+    enqueue(e, 3, 9000, {
       agent,
-      task:
-        'Ты слышишь, о чём экипаж только что говорил вслух (расшифровка выше), и видишь, что он делает. ' +
-        'Встрянь одной-двумя фразами в своём характере: отреагируй на конкретные слова игроков — ' +
-        'подскажи, куда смотреть по цели шага, поправь заблуждение или просто пошути. Ответ головоломки не называй.',
+      // Новые фразы вслух — это диалог: отвечаем на них. Тишина — комментируем прогресс и дорогу впереди.
+      task: heard
+        ? 'Экипаж только что говорил вслух (последние фразы расшифровки выше) — это обращено и к тебе. Ответь на конкретные слова, ' +
+          'как в живом разговоре, в своём характере: на вопрос — ответь, на ошибку — поправь, можно пошутить. Ответ головоломки не называй.'
+        : 'Экипаж молчит. Прокомментируй одной-двумя фразами в своём характере, как идут дела: что уже сделано, что впереди на пути, ' +
+          'кого подбодрить или подколоть по имени. Ответ головоломки не называй.',
+      extra: progressLines(c),
+      // Инициативную реплику никто не ждёт с таймером — можно дольше ждать первого слова.
+      firstTokenMs: 9000,
+      speech,
+      // Повтор прошлой реплики — молчим (уйдёт целиком на финале, без потоковых кусков).
+      guard: (t) => !tooSimilar(t, said),
     });
   }
+}
+
+/** Прогресс по трассе: где передний край экипажа и что там по описанию уровня. */
+function progressLines(c: SessionContext): string[] {
+  const s = c.snapshot;
+  if (!s) return [];
+  const crew = s.crew.filter((m) => m.connected);
+  if (!crew.length) return [];
+  const lead = crew.reduce((a, b) => (b.x > a.x ? b : a));
+  const ahead = guideFor(getLevel(s.levelId), lead.x);
+  const falls = crew.filter((m) => m.falls > 0).map((m) => `${m.name} — ${m.falls}`);
+  return [
+    `Дальше всех по трассе ${lead.name}.${ahead ? ` Там сейчас: ${ahead}` : ''}`,
+    ...(falls.length ? [`Падений в эту эпоху: ${falls.join(', ')}.`] : []),
+  ];
 }
 
 /** Кто комментирует: рассказчик эпохи (2 раза из 3) или ХРОНОС; на борту — ХРОНОС. */
@@ -112,6 +140,14 @@ function commentator(c: SessionContext, agents: Agents): AgentProfile | undefine
 interface SpeakPlan {
   agent: AgentProfile;
   task: string;
+  /** Дополнительные строки «Ситуации» (прогресс по трассе). */
+  extra?: string[];
+  /** Потолок длины ответа в токенах (по умолчанию — MAX_TOKENS). */
+  maxTokens?: number;
+  /** Сколько ждать первого токена (по умолчанию — FIRST_TOKEN_MS). */
+  firstTokenMs?: number;
+  /** Свои строки расшифровки (комментарий — только неотвеченные); по умолчанию — все свежие. */
+  speech?: string[];
   to?: string;
   hintLevel?: 1 | 2 | 3;
   guard?: (text: string) => boolean;
@@ -166,17 +202,17 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
   const c = ctx(e.session);
   const messages = buildMessages({
     agent: plan.agent,
-    situation: situation(c.snapshot),
+    situation: [...situation(c.snapshot), ...(plan.extra ?? [])],
     recent: c.recent,
     memory,
-    speech: speechLines(c),
+    speech: plan.speech ?? speechLines(c),
     said: saidBy(c, plan.agent.id),
     task: plan.task,
   });
 
   const ac = new AbortController();
   let reason: 'first-token' | 'deadline' | null = null;
-  const firstTokenTimer = setTimeout(() => ((reason = 'first-token'), ac.abort()), config.firstTokenMs);
+  const firstTokenTimer = setTimeout(() => ((reason = 'first-token'), ac.abort()), plan.firstTokenMs ?? config.firstTokenMs);
   const deadline = setTimeout(() => ((reason = 'deadline'), ac.abort()), STREAM_DEADLINE_MS - 1500);
   let lastFlush = 0;
   let flushed = '';
@@ -185,6 +221,7 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
   try {
     const res = await streamChat(messages, {
       signal: ac.signal,
+      maxTokens: plan.maxTokens,
       onToken: (raw) => {
         clearTimeout(firstTokenTimer);
         const now = Date.now();

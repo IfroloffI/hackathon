@@ -27,6 +27,7 @@ import {
   PLAYER_SIZE,
   type GateDef,
   getSkin,
+  guideFor,
   isNearStation,
   levelFromXp,
   stepCrates,
@@ -581,6 +582,19 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
     this.defer(e.seq, ASK_TIMEOUT_MS, fallback);
   }
 
+  /**
+   * E у NPC — подсказка по прохождению уровня всему экипажу: участок трассы, где сейчас передний край
+   * экипажа, и следующий (Level.guide). Звучит сразу и дословно — пересказ маленькой LLM терял суть
+   * и не успевал; характер персонажа — в его репликах раз в ~10 с (agent-service).
+   */
+  private guide(client: CrewClient, agentId: string) {
+    const front = Math.max(...[...this.state.players.values()].filter((p) => p.connected).map((p) => p.x));
+    const text = guideFor(this.level, Number.isFinite(front) ? front : this.level.spawn.x);
+    if (!text) return this.ask(client, agentId, '');
+    this.emit('agent.ask', client.sessionId, { agentId, text: '', guide: text });
+    this.sayTo(null, agentId, `💡 ${text}`, 'script');
+  }
+
   /** Отложить заготовку до ответа LLM на событие seq (см. REACT_TIMEOUT_MS в shared/src/llm.ts). */
   private defer(seq: number, ms: number, fallback: () => void) {
     const timer = setTimeout(() => {
@@ -713,7 +727,7 @@ export class CrewRoom extends Room<{ state: CrewState; metadata: CrewRoomMetadat
         const agent = station.agent ?? SHIP_AI.id;
         // Пока ворота закрыты, хозяин ворот только повторяет вопрос — брифинг после ответа.
         if (this.closedGate()?.agent === agent) return void this.askGateQuestion(client);
-        this.ask(client, agent, '');
+        this.guide(client, agent);
         this.advance(this.scenario.talkedTo(agent, this.facts()));
         return;
       }

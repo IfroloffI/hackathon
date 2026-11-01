@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVELS, type Level } from './level.ts';
+import { LEVELS, guideFor, type Level } from './level.ts';
 import { cratesAtHome, cratesSolved, stepCrates, withCrates, type CrateBody, type CratePos } from './mechanics.ts';
 import { explore, posesAt, reaches } from './reachability.ts';
 
@@ -90,5 +90,15 @@ test('у вентиляторов и стрел есть окно, чтобы п
   for (const level of Object.values(LEVELS)) {
     for (const f of level.fans ?? []) if (f.period) assert.ok(f.period - (f.on ?? f.period / 2) >= 1.8, `${level.id}: вентилятор x=${f.x} отдыхает меньше 1.8 с`);
     for (const a of level.arrows ?? []) assert.ok((a.period ?? 1.8) >= 1.4, `${level.id}: стрелы x=${a.x} чаще 1.4 с`);
+  }
+});
+
+test('у каждого уровня есть подсказка по прохождению: участки по порядку, подсказка растёт с прогрессом', () => {
+  for (const level of Object.values(LEVELS)) {
+    const g = level.guide ?? [];
+    assert.ok(g.length >= 2, `${level.id}: нет подсказок`);
+    for (let i = 1; i < g.length; i++) assert.ok(g[i].x > g[i - 1].x, `${level.id}: участки не по порядку`);
+    assert.ok(guideFor(level, level.spawn.x).startsWith(g[0].text), `${level.id}: на старте — первый участок`);
+    assert.ok(guideFor(level, level.bounds.maxX).startsWith(g[g.length - 1].text), `${level.id}: в конце — последний участок`);
   }
 });

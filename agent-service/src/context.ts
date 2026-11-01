@@ -18,6 +18,8 @@ export interface SessionContext {
   speech: Phrase[];
   /** Новых фраз с прошлого комментария NPC. */
   speechSinceComment: number;
+  /** До какого момента фразы уже «отвечены» комментарием — второй раз на них не реагируем. */
+  answeredUpTo: number;
   lastCommentAt: number;
   /** Когда любой NPC говорил последний раз — комментарии не перебивают. */
   lastAnySpeechAt: number;
@@ -34,7 +36,7 @@ const sessions = new Map<string, SessionContext>();
 export function ctx(session: string): SessionContext {
   let c = sessions.get(session);
   if (!c) {
-    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0 };
+    c = { snapshot: null, recent: [], lastShipSpeechAt: 0, lastProactiveAt: 0, speech: [], speechSinceComment: 0, answeredUpTo: 0, lastCommentAt: Date.now(), lastAnySpeechAt: 0, said: new Map(), comments: 0 };
     sessions.set(session, c);
   }
   return c;
@@ -54,9 +56,29 @@ export function hearPhrase(session: string, p: Phrase, seed = false) {
   if (!seed) c.speechSinceComment++;
 }
 
-/** Последние фразы экипажа вслух (свежее — за последние минуты) для промпта. */
-export function speechLines(c: SessionContext, now = Date.now(), maxAgeMs = 4 * 60_000): string[] {
-  return c.speech.filter((p) => now - p.at <= maxAgeMs).slice(-8).map((p) => `${p.name}: «${p.text.slice(0, 160)}»`);
+/** Последние фразы экипажа вслух (свежее — за последние минуты) для промпта. after — только новее этого момента. */
+export function speechLines(c: SessionContext, now = Date.now(), maxAgeMs = 4 * 60_000, after = 0): string[] {
+  return c.speech.filter((p) => now - p.at <= maxAgeMs && p.at > after).slice(-8).map((p) => `${p.name}: «${p.text.slice(0, 160)}»`);
+}
+
+/** Пометить всё услышанное как отвеченное (комментарий NPC на это уже прозвучал). */
+export function markAnswered(c: SessionContext) {
+  c.answeredUpTo = c.speech.at(-1)?.at ?? c.answeredUpTo;
+  c.speechSinceComment = 0;
+}
+
+const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2));
+
+/** Похожа ли реплика на одну из прошлых (доля общих слов) — тогда лучше промолчать, чем повториться. */
+export function tooSimilar(text: string, previous: string[], threshold = 0.5): boolean {
+  const a = words(text);
+  if (!a.size) return false;
+  return previous.some((p) => {
+    const b = words(p);
+    let common = 0;
+    for (const w of a) if (b.has(w)) common++;
+    return common / Math.min(a.size, b.size || 1) >= threshold;
+  });
 }
 
 /** Свои последние реплики агента. */
@@ -76,6 +98,7 @@ export function describe(e: GameEvent): string | null {
     case 'chat':
       return `${who} в чате: «${String(d.text).slice(0, 120)}»`;
     case 'agent.ask':
+      if (d.guide) return `${who} попросил подсказку, как пройти дальше (подсказка уже прозвучала)`;
       return d.text ? `${who} спросил агента: «${String(d.text).slice(0, 120)}»` : `${who} подошёл поговорить`;
     case 'agent.say':
       return `${String(d.agentId) === 'ship_ai' ? 'ХРОНОС' : 'рассказчик'} сказал: «${String(d.text).slice(0, 140)}»`;

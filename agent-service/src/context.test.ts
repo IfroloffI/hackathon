@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { GameEvent } from '@chronolet/shared';
-import { ctx, hearPhrase, remember, saidBy, speechLines } from './context.ts';
+import { ctx, hearPhrase, markAnswered, remember, saidBy, speechLines, tooSimilar } from './context.ts';
 
 const say = (session: string, agentId: string, text: string, seq: number) =>
   ({ seq, ts: Date.now(), session, type: 'agent.say', level: 'padua', scenario: null, step: null, player: null, data: { agentId, text } }) as unknown as GameEvent;
@@ -22,4 +22,21 @@ test('расшифровки: дубликаты не копятся, истор
   assert.deepEqual(speechLines(ctx('S2'), now), ['Аня: «привет»', 'Боря: «куда идти?»']);
   hearPhrase('S2', { name: 'Вова', text: 'старое', at: now - 10 * 60_000 });
   assert.equal(speechLines(ctx('S2'), now).length, 2, 'старше 4 минут — не в промпт');
+});
+
+test('повтор прошлой реплики распознаётся, новая мысль — нет', () => {
+  const said = ['Кстати, рычаг прыжка тут ни к чему, а паркур-отсек — это забавно.'];
+  assert.ok(tooSimilar('Кстати, рычаг прыжка ни к чему, а паркур-отсек действительно забавный.', said));
+  assert.ok(!tooSimilar('Аня, толкай ящик к скале — с него залезешь наверх.', said));
+});
+
+test('отвеченные фразы второй раз не подаются как новые', () => {
+  const now = Date.now();
+  hearPhrase('S3', { name: 'Аня', text: 'зачем рычаг?', at: now - 2000 });
+  const c = ctx('S3');
+  markAnswered(c);
+  assert.equal(c.speechSinceComment, 0);
+  assert.deepEqual(speechLines(c, now, 4 * 60_000, c.answeredUpTo), []);
+  hearPhrase('S3', { name: 'Боря', text: 'а где ящик?', at: now });
+  assert.deepEqual(speechLines(c, now, 4 * 60_000, c.answeredUpTo), ['Боря: «а где ящик?»']);
 });

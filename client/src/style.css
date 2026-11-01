@@ -208,12 +208,19 @@ kbd {
 .snack.xp { min-width: 0; padding: 6px 12px; background: rgba(0, 119, 255, 0.9); color: #fff; font-weight: 600; }
 @keyframes snack-in { from { transform: translateX(-20px); opacity: 0; } }
 
+/* Реплика NPC — крупно по центру экрана (над персонажами): NPC говорит раз в ~10 с и отвечает на голос. */
 #subtitle {
-  position: fixed; top: 76px; left: 50%; transform: translateX(-50%);
-  width: min(620px, calc(100vw - 560px)); min-width: 280px; margin: 0; padding: 10px 14px; line-height: 1.4;
-  border-left: 3px solid var(--vk-blue);
+  position: fixed; top: 24vh; left: 50%; transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px)); margin: 0; padding: 14px 20px; line-height: 1.45;
+  font-size: 18px; text-align: center; pointer-events: none; z-index: 5;
+  border: 2px solid var(--vk-blue); border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  animation: say-in 0.25s ease-out;
 }
-#subtitle.npc { border-left-color: #ffd36b; }
+#subtitle b { display: block; margin-bottom: 4px; font-size: 14px; letter-spacing: 0.02em; color: #9fd3ff; }
+#subtitle.npc { border-color: #ffd36b; }
+#subtitle.npc b { color: #ffd36b; }
+@keyframes say-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 #subtitle .typing::after { content: '▍'; animation: blink 0.8s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 #toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); margin: 0; padding: 8px 14px; max-width: calc(100vw - 32px); text-align: center; }
@@ -278,7 +285,7 @@ kbd {
 
 @media (max-width: 900px) {
   .hud-right { width: 220px; }
-  #subtitle { width: calc(100vw - 32px); top: auto; bottom: 330px; }
+  #subtitle { top: 18vh; font-size: 16px; }
   #puzzle { bottom: 260px; max-height: 40vh; }
   #prompt { bottom: 440px; }
 }
