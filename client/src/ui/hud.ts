@@ -15,6 +15,7 @@ import {
   type XpGain,
 } from '@chronolet/shared';
 import { net, type CrewRoom, type NetPlayer } from '../net/connection.ts';
+import { music } from '../game/music.ts';
 import { VoiceChat, type VoiceSnapshot } from '../net/voice.ts';
 import { copyText, inviteLink } from './invite.ts';
 import { mountPuzzlePanel } from './puzzlePanel.ts';
@@ -363,6 +364,17 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
     toast.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => (toast.hidden = true), copied ? 4000 : 12000);
+  };
+
+  const musicToggle = $<HTMLButtonElement>('music-toggle');
+  const renderMusic = () => {
+    musicToggle.textContent = music.isMuted() ? '🔇' : '🎵';
+    musicToggle.title = music.isMuted() ? 'Включить музыку' : 'Выключить музыку';
+  };
+  renderMusic();
+  musicToggle.onclick = () => {
+    music.toggleMute();
+    renderMusic();
   };
 
   return () => {
