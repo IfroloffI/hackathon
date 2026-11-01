@@ -47,29 +47,12 @@ interface FlockDef {
 
 /** Кучка и места присада — по реальным платформам уровней (shared/src/level.ts). */
 const FLOCKS: Record<string, FlockDef> = {
-  hub: {
-    species: 'gull',
-    style: { body: 0xf2f4f8, wing: 0xa8b4c4, beak: 0xff8a3c },
-    at: { x: -9.5, y: 0, z: -4.4 },
-    spots: [
-      { x: -10, y: 2.1, z: 0.2 },
-      { x: 10.5, y: 2.1, z: 0.2 },
-      { x: 20, y: 0, z: -3.4 },
-      { x: 5, y: 0, z: -4.2 },
-      { x: 26, y: 2.6, z: 0.6 },
-    ],
-    // Птицы держатся под потолком палубы — летают ниже трёх.
-    segs: [
-      [-14, 14.2],
-      [17.2, 61],
-    ],
-    yRange: [1.6, 2.8],
-  },
   alexandria: {
     species: 'gull',
     style: { body: 0xefe6cf, wing: 0xb9976a, beak: 0xd88a3c },
-    at: { x: 18.5, y: 0, z: -4 },
+    at: { x: -19, y: 0, z: -4.3 },
     spots: [
+      { x: -26.5, y: 0, z: -4.2 },
       { x: 33, y: 2, z: -1.6 },
       { x: 61, y: 0, z: -3.4 },
       { x: 74, y: 0, z: -4.2 },
@@ -82,8 +65,9 @@ const FLOCKS: Record<string, FlockDef> = {
   padua: {
     species: 'dove',
     style: { body: 0x8a6a52, wing: 0x5f4632, beak: 0xe8b45c },
-    at: { x: 64.5, y: 0, z: -3.6 },
+    at: { x: -19, y: 0, z: -4.3 },
     spots: [
+      { x: -26.5, y: 0, z: -4.2 },
       { x: 47.5, y: 0, z: -4.4 },
       { x: 52.5, y: 0, z: -4.4 },
       { x: 68, y: 5.4, z: 0.4 },
@@ -96,8 +80,9 @@ const FLOCKS: Record<string, FlockDef> = {
   woolsthorpe: {
     species: 'dove',
     style: { body: 0x9a6a42, wing: 0x6f4d32, beak: 0xe0a53c },
-    at: { x: 30, y: 0, z: -4.5 },
+    at: { x: -19, y: 0, z: -4.3 },
     spots: [
+      { x: -26.5, y: 0, z: -4.2 },
       { x: 25, y: 4.4, z: 0.4 },
       { x: 53.8, y: 1.4, z: 0.2 },
       { x: 59.8, y: 1.4, z: 0.2 },
@@ -110,8 +95,9 @@ const FLOCKS: Record<string, FlockDef> = {
   bletchley: {
     species: 'dove',
     style: { body: 0x9aa0a8, wing: 0x6f757e, beak: 0xc08050 },
-    at: { x: 28, y: 0, z: -4.6 },
+    at: { x: -19, y: 0, z: -4.3 },
     spots: [
+      { x: -26.5, y: 0, z: -4.2 },
       { x: 28, y: 4, z: 0 },
       { x: 60, y: 2.8, z: 0.4 },
       { x: 76, y: 0, z: -4.4 },
@@ -124,8 +110,9 @@ const FLOCKS: Record<string, FlockDef> = {
   baikonur: {
     species: 'gull',
     style: { body: 0xb5915a, wing: 0x7d5a38, beak: 0xa0522d },
-    at: { x: 46, y: 0, z: -4.2 },
+    at: { x: -19, y: 0, z: -4.3 },
     spots: [
+      { x: -26.5, y: 0, z: -4.2 },
       { x: 20, y: 2.8, z: -0.6 },
       { x: 86, y: 0, z: -3.6 },
       { x: 94, y: 0, z: 0.8 },
@@ -136,6 +123,10 @@ const FLOCKS: Record<string, FlockDef> = {
     yRange: [2.4, 10],
   },
 };
+
+const BIRD_SCALE = 1.35;
+/** Полуширина зоны вокруг экипажа, где стая выбирает точки полёта (камера видит ~±10 м). */
+const WANDER_HALF = 12;
 
 type BirdState = 'sit' | 'fly' | 'land';
 
@@ -153,6 +144,8 @@ interface Bird {
   flapOff: number;
   timer: number;
   flightTimer: number;
+  /** Летит на присад (а не просто к точке полёта) — только тогда у цели садится. */
+  landing: boolean;
 }
 
 /** Плюшевая птица: тело вдоль x, голова с конусным клювом и глазами, хвост, крылья на плечах. */
@@ -198,7 +191,7 @@ export interface Birds {
 }
 
 /** Стая птиц уровня (null — уровень без птиц). Птицы — чистый визуал. */
-export function birdFlock(level: Level, count = 6): Birds | null {
+export function birdFlock(level: Level, count = 8): Birds | null {
   const def = FLOCKS[level.id];
   if (!def) return null;
   const g = new THREE.Group();
@@ -211,6 +204,8 @@ export function birdFlock(level: Level, count = 6): Birds | null {
   const birds: Bird[] = [];
   for (let i = 0; i < count; i++) {
     const { root, wings, sides } = buildBird(species, def.style);
+    // Плюшевые птицы мелкие для камеры на 15 м — чуть крупнее, чтобы читались на уровне.
+    root.scale.setScalar(BIRD_SCALE);
     const nest = new THREE.Vector3(def.at.x + (rnd() - 0.5) * 1.6, def.at.y, def.at.z + (rnd() - 0.5) * 1.2);
     root.position.copy(nest);
     g.add(root);
@@ -228,18 +223,29 @@ export function birdFlock(level: Level, count = 6): Birds | null {
       flapOff: rnd() * Math.PI * 2,
       timer: 0,
       flightTimer: 6 + rnd() * 8,
+      landing: false,
     });
   }
 
+  /** Где сейчас экипаж (среднее x игроков): стая кружит рядом с ним, а не по всему уровню. */
+  let crewX = def.at.x;
   const pickWander = (b: Bird) => {
     const seg = def.segs.length > 1 && rnd() > 0.5 ? def.segs[1] : def.segs[0];
     const [s0, s1] = seg ?? [xMin, xMax];
-    b.target.set(s0 + rnd() * (s1 - s0), yMin + rnd() * (yMax - yMin), zMin + rnd() * (zMax - zMin));
+    const lo = Math.max(s0, crewX - WANDER_HALF);
+    const hi = Math.min(s1, crewX + WANDER_HALF);
+    const x = lo < hi ? lo + rnd() * (hi - lo) : s0 + rnd() * (s1 - s0);
+    b.target.set(x, yMin + rnd() * (yMax - yMin), zMin + rnd() * (zMax - zMin));
+    b.landing = false;
   };
-  const pickLanding = (b: Bird) => {
-    const near = def.spots.filter((sp) => Math.abs(sp.x - b.pos.x) < 34);
-    const spot = (near.length ? near : def.spots)[Math.floor(rnd() * (near.length ? near.length : def.spots.length))];
+  /** Присесть на полку рядом с экипажем; нет такой — false, птица кружит дальше. */
+  const pickLanding = (b: Bird): boolean => {
+    const near = def.spots.filter((sp) => Math.abs(sp.x - crewX) < WANDER_HALF);
+    if (!near.length) return false;
+    const spot = near[Math.floor(rnd() * near.length)];
     b.target.set(spot.x + (rnd() - 0.5) * 0.4, spot.y, spot.z + (rnd() - 0.5) * 0.3);
+    b.landing = true;
+    return true;
   };
   const flyAway = (b: Bird) => {
     b.state = 'fly';
@@ -247,14 +253,26 @@ export function birdFlock(level: Level, count = 6): Birds | null {
     b.timer = 6 + rnd() * 10;
     b.flightTimer = b.timer;
   };
+  // Половина стаи с самого начала в воздухе — птиц видно сразу при входе на уровень.
+  birds.forEach((b, i) => {
+    if (i % 2) return;
+    flyAway(b);
+    b.pos.y = yMin + rnd() * (yMax - yMin);
+    b.root.position.copy(b.pos);
+  });
+  // Близость — по ходу уровня (x) и высоте: игрок бежит по дорожке z≈0, а птицы сидят у задней кромки (z≈-4),
+  // поэтому глубину не учитываем — иначе стаю не спугнуть.
   const near1 = (p: { x: number; y: number; z: number }, q: { x: number; y: number; z: number }, r: number) =>
-    Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z) < r;
+    Math.hypot(p.x - q.x, p.y - q.y) < r;
+  /** Птица далеко от экипажа (вне кадра) — пора лететь к нему. */
+  const farFromCrew = (x: number) => Math.abs(x - crewX) > WANDER_HALF * 1.5;
 
   const dir = new THREE.Vector3();
   const desired = new THREE.Vector3();
   return {
     root: g,
     update(t, dt, players) {
+      if (players.length) crewX = players.reduce((a, p) => a + p.x, 0) / players.length;
       for (const b of birds) {
         if (b.state === 'sit') {
           // Дремлют: подходит первый игрок — вся стая разлетается.
@@ -269,7 +287,7 @@ export function birdFlock(level: Level, count = 6): Birds | null {
           continue;
         }
         if (b.state === 'land') {
-          if (players.some((p) => near1(p, b.pos, 2.8))) {
+          if (players.some((p) => near1(p, b.pos, 2.8)) || farFromCrew(b.pos.x)) {
             // Вспорхнула: резко вверх и дальше кружить.
             b.state = 'fly';
             pickWander(b);
@@ -284,18 +302,17 @@ export function birdFlock(level: Level, count = 6): Birds | null {
           // Полёт: догоняем цель, у цели — новая; изредка сажаемся на ближайшую полку.
           b.flightTimer -= dt;
           b.timer -= dt;
-          if (b.timer <= 0 && b.flightTimer <= 0 && rnd() > 0.4) {
-            pickLanding(b);
+          if (b.timer <= 0 && b.flightTimer <= 0 && rnd() > 0.4 && pickLanding(b)) {
             b.timer = 20;
             b.flightTimer = 8;
-          } else if (b.flightTimer <= 0) {
+          } else if (b.flightTimer <= 0 || (!b.landing && farFromCrew(b.target.x))) {
             pickWander(b);
             b.flightTimer = 5 + rnd() * 7;
             if (b.timer <= 0) b.timer = 8 + rnd() * 8;
           }
           dir.subVectors(b.target, b.pos);
           if (dir.length() < 0.6) {
-            if (b.timer > 10 && Math.hypot(b.target.y - b.pos.y) < 1) {
+            if (b.landing) {
               // Долетели до присада — сели.
               b.state = 'land';
               b.vel.set(0, 0, 0);
@@ -305,7 +322,10 @@ export function birdFlock(level: Level, count = 6): Birds | null {
             pickWander(b);
             b.flightTimer = 5 + rnd() * 7;
           } else {
-            desired.copy(dir).normalize().multiplyScalar(species.speed * (0.85 + Math.sin(t * 1.3 + b.phase) * 0.15));
+            // Отстала от экипажа (игрок бежит 6 м/с) — нагоняет быстрее, до ×3.
+            const lag = Math.abs(b.pos.x - crewX) - WANDER_HALF;
+            const boost = lag > 0 ? 1 + Math.min(2, lag / 4) : 1;
+            desired.copy(dir).normalize().multiplyScalar(species.speed * boost * (0.85 + Math.sin(t * 1.3 + b.phase) * 0.15));
             b.vel.lerp(desired, Math.min(1, dt * 2));
             b.pos.addScaledVector(b.vel, dt);
             b.root.position.copy(b.pos);

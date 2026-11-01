@@ -89,6 +89,7 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
   const decor = (THEMES[level.id] ?? decorateHub)(g, scene);
   const obstacles = buildObstacles(g, level);
   const birds = birdFlock(level);
+  if (birds) g.add(birds.root);
 
   // Мигающие светодиоды пультов и анимированные объекты (батуты, вентиляторы, метки станций…).
   const leds: THREE.Mesh[] = [];
