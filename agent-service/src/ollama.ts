@@ -30,7 +30,16 @@ export async function streamChat(
       messages,
       stream: true,
       keep_alive: -1,
-      options: { num_predict: opts.maxTokens ?? config.maxTokens, temperature: 0.7, top_p: 0.9, num_ctx: 2048 },
+      // Разнообразие: выше температура, штраф за повторы, случайный seed (иначе одинаковый промпт → одинаковый ответ).
+      options: {
+        num_predict: opts.maxTokens ?? config.maxTokens,
+        temperature: 0.8,
+        top_p: 0.9,
+        repeat_penalty: 1.08,
+        repeat_last_n: 128,
+        seed: Math.floor(Math.random() * 2 ** 31),
+        num_ctx: 3072,
+      },
     }),
   });
   if (!res.ok || !res.body) throw new Error(`ollama HTTP ${res.status}`);

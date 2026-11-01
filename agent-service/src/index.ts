@@ -5,7 +5,8 @@ import { api } from './api.ts';
 import { ctx, remember } from './context.ts';
 import { checkModel, health, warmup } from './ollama.ts';
 import { systemPrompt } from './prompt.ts';
-import { onEvent } from './responder.ts';
+import { maybeComment, onEvent } from './responder.ts';
+import { seedSession, startTranscripts } from './transcripts.ts';
 
 /**
  * agent-service: realtime-LLM для NPC «Хронолёта» по контракту chronolet.llm/1.
@@ -52,7 +53,10 @@ function connect() {
   ws.on('message', (raw) => {
     const m = JSON.parse(String(raw)) as LlmStreamMessage;
     if (m.type === 'hello' && lastSeq === undefined) lastSeq = m.lastSeq;
-    if (m.type === 'snapshot') ctx(m.snapshot.session).snapshot = m.snapshot;
+    if (m.type === 'snapshot') {
+      ctx(m.snapshot.session).snapshot = m.snapshot;
+      void seedSession(m.snapshot.session);
+    }
     if (m.type === 'event') {
       lastSeq = Math.max(lastSeq ?? 0, m.event.seq);
       remember(m.event);
@@ -72,3 +76,6 @@ await loadContent();
 await watchOllama();
 setInterval(() => void watchOllama(), 10_000).unref();
 connect();
+// «Уши» NPC: расшифровки голоса из Redis и периодические комментарии к разговору экипажа.
+void startTranscripts();
+setInterval(() => maybeComment({ get: (id) => agents.get(id) }), 5000).unref();

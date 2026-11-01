@@ -26,19 +26,44 @@ export interface PromptInput {
   situation: string[];
   recent: string[];
   memory?: LlmMemory | null;
+  /** Что экипаж говорил вслух (расшифровка голосового чата). */
+  speech?: string[];
+  /** Что этот агент уже говорил — повторять нельзя. */
+  said?: string[];
   /** Что именно сделать (инструкция, не готовая реплика). */
   task: string;
 }
 
-export function buildMessages(p: PromptInput): ChatMessage[] {
+/**
+ * Разные «заходы» для реплики — чтобы на одинаковую ситуацию персонаж отвечал по-разному.
+ * Выбирается случайно; это подсказка тона, а не готовый текст.
+ */
+const ANGLES = [
+  'зайди с неожиданной стороны',
+  'добавь короткую шутку в своём духе',
+  'сошлись на случай из своей жизни или эпохи',
+  'обратись к кому-то из экипажа по имени',
+  'задай встречный вопрос',
+  'скажи образно, через сравнение',
+  'будь предельно краток',
+  'вырази удивление или восхищение',
+];
+
+export function pickAngle(rand = Math.random): string {
+  return ANGLES[Math.floor(rand() * ANGLES.length)];
+}
+
+export function buildMessages(p: PromptInput, angle = pickAngle()): ChatMessage[] {
   const parts = ['Ситуация:', ...p.situation.map((l) => `- ${l}`)];
   if (p.recent.length) parts.push('Недавно:', ...p.recent.slice(-6).map((l) => `- ${l}`));
+  if (p.speech?.length) parts.push('Что экипаж говорил вслух (расшифровка голосового чата, возможны ошибки распознавания):', ...p.speech.map((l) => `- ${l}`));
   if (p.memory && (p.memory.summary || p.memory.mistakes.length)) {
     parts.push('Что ты помнишь об этом игроке:');
     if (p.memory.summary) parts.push(`- ${p.memory.summary}`);
     if (p.memory.mistakes.length) parts.push(`- его ошибки: ${p.memory.mistakes.slice(-3).join('; ')}`);
   }
-  parts.push('', `Задача: ${p.task}`);
+  if (p.said?.length) parts.push('Твои последние реплики — не повторяй ни слова, ни мысли, скажи по-новому:', ...p.said.map((l) => `- «${l}»`));
+  parts.push('', `Задача: ${p.task}`, `Тон: ${angle}.`);
   return [
     { role: 'system', content: systemPrompt(p.agent) },
     { role: 'user', content: parts.join('\n') },

@@ -12,6 +12,7 @@
   "dependencies": {
     "@chronolet/shared": "*",
     "@colyseus/schema": "^5.0.43",
+    "redis": "^5.12.1",
     "tsx": "^4.19.2",
     "ws": "^8.19.0"
   },

@@ -47,12 +47,16 @@ services:
     depends_on:
       ollama-pull:
         condition: service_completed_successfully
-      game:
+      redis:
         condition: service_healthy
     environment:
-      # Внутри сети compose; сертификат игры самоподписанный — проверку TLS для этого адреса отключаем.
-      SERVER_URL: ${SERVER_URL:-https://game:2567}
+      # Игра на хосте (npm start) — по https: сертификат самоподписанный, проверку TLS отключаем.
+      # В полном стеке (npm run up) scripts/up.sh подставляет https://game:2567.
+      SERVER_URL: ${SERVER_URL:-https://host.docker.internal:2567}
       NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      # Расшифровки голоса — NPC комментируют, о чём говорит экипаж (COMMENT_GAP_MS — как часто).
+      REDIS_URL: redis://redis:6379/0
+      COMMENT_GAP_MS: ${COMMENT_GAP_MS:-45000}
       LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}

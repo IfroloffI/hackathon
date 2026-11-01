@@ -40,6 +40,8 @@ export LIVEKIT_NODE_IP="${LIVEKIT_NODE_IP:-$(detect_ip)}"
 [[ -z "$LIVEKIT_NODE_IP" ]] && LIVEKIT_NODE_IP=127.0.0.1
 # LiveKit в полном стеке — сервис compose, а не процесс на хосте: туда же ходит агент расшифровки.
 export TRANSCRIBER_LIVEKIT_URL="${TRANSCRIBER_LIVEKIT_URL:-ws://livekit:17880}"
+# И игра — сервис compose: agent-service ходит к ней по имени.
+export SERVER_URL="${SERVER_URL:-https://game:2567}"
 
 CERT_DIR="$ROOT/livekit/certs"
 if [[ ! -f "$CERT_DIR/dev-cert.pem" || ! -f "$CERT_DIR/dev-key.pem" ]]; then

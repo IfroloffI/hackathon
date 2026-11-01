@@ -19,6 +19,14 @@ services:
     environment:
       REDIS_PORT: '6380'
 
+  agent-service:
+    network_mode: host
+    extra_hosts: !reset []
+    environment:
+      SERVER_URL: ${SERVER_URL:-https://127.0.0.1:2567}
+      OLLAMA_URL: ${OLLAMA_URL:-http://127.0.0.1:11434}
+      REDIS_URL: redis://127.0.0.1:6380/0
+
   transcriber:
     network_mode: host
     extra_hosts: !reset []

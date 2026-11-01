@@ -1,7 +1,7 @@
-import { ASK_TIMEOUT_MS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
+import { ASK_TIMEOUT_MS, EPOCHS, REACT_TIMEOUT_MS, STREAM_DEADLINE_MS, type AgentProfile, type GameEvent, type ReplyableData } from '@chronolet/shared';
 import { config } from './config.ts';
 import { api } from './api.ts';
-import { ctx, situation } from './context.ts';
+import { allSessions, ctx, saidBy, situation, speechLines, type SessionContext } from './context.ts';
 import { buildMessages, cleanReply, keepsNumbers } from './prompt.ts';
 import { health, streamChat } from './ollama.ts';
 import { TaskQueue } from './queue.ts';
@@ -66,6 +66,49 @@ export function onEvent(e: GameEvent, agents: Agents) {
   }
 }
 
+/**
+ * Инициативный комментарий к разговору экипажа: раз в COMMENT_GAP_MS, если вслух сказали хоть что-то
+ * новое (расшифровки из Redis) и NPC не говорили только что. В эпохе обычно говорит её рассказчик,
+ * иногда — ХРОНОС; на борту — ХРОНОС. Реплика уходит всем: субтитр + строка в чате.
+ */
+export function maybeComment(agents: Agents, now = Date.now()) {
+  if (!health.ok) return;
+  for (const [session, c] of allSessions()) {
+    if (!c.snapshot || c.speechSinceComment < config.commentMinPhrases) continue;
+    if (now - c.lastCommentAt < config.commentGapMs || now - c.lastAnySpeechAt < config.commentQuietMs) continue;
+    const agent = commentator(c, agents);
+    if (!agent) continue;
+    c.lastCommentAt = now;
+    c.speechSinceComment = 0;
+    c.comments++;
+    const e = {
+      seq: 0,
+      ts: now,
+      session,
+      type: 'transcript.comment',
+      level: c.snapshot.levelId,
+      scenario: null,
+      step: null,
+      player: null,
+      data: {},
+    } as unknown as GameEvent;
+    enqueue(e, 3, 15000, {
+      agent,
+      task:
+        'Ты слышишь, о чём экипаж только что говорил вслух (расшифровка выше), и видишь, что он делает. ' +
+        'Встрянь одной-двумя фразами в своём характере: отреагируй на конкретные слова игроков — ' +
+        'подскажи, куда смотреть по цели шага, поправь заблуждение или просто пошути. Ответ головоломки не называй.',
+    });
+  }
+}
+
+/** Кто комментирует: рассказчик эпохи (2 раза из 3) или ХРОНОС; на борту — ХРОНОС. */
+function commentator(c: SessionContext, agents: Agents): AgentProfile | undefined {
+  const narrator = EPOCHS.find((ep) => ep.levelId === c.snapshot?.levelId)?.narrator.id;
+  const id = narrator && c.comments % 3 !== 2 ? narrator : 'ship_ai';
+  return agents.get(id) ?? agents.get('ship_ai');
+}
+
 interface SpeakPlan {
   agent: AgentProfile;
   task: string;
@@ -121,7 +164,15 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
 
   const memory = plan.withMemory && plan.to ? await api.getMemory(plan.agent.id, plan.to) : null;
   const c = ctx(e.session);
-  const messages = buildMessages({ agent: plan.agent, situation: situation(c.snapshot), recent: c.recent, memory, task: plan.task });
+  const messages = buildMessages({
+    agent: plan.agent,
+    situation: situation(c.snapshot),
+    recent: c.recent,
+    memory,
+    speech: speechLines(c),
+    said: saidBy(c, plan.agent.id),
+    task: plan.task,
+  });
 
   const ac = new AbortController();
   let reason: 'first-token' | 'deadline' | null = null;
