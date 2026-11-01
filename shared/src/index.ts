@@ -12,3 +12,4 @@ export * from './events.ts';
 export * from './scenarios.ts';
 export * from './achievements.ts';
 export * from './llm.ts';
+export * from './admin.ts';

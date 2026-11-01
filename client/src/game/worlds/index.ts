@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EPOCHS, GATE_SIZE, mechClock, type CratePos, type Level } from '@chronolet/shared';
 import { Character } from '../Character.ts';
+import { birdFlock, type Birds } from './birds.ts';
 import { disposeTree, levelDepth, platformMesh, stationMarker } from './common.ts';
 import { vkCoin, type CoinView } from './vkCoin.ts';
 import type { Decor } from './decor.ts';
@@ -10,8 +11,8 @@ import { decorateHub } from './hub.ts';
 import { decorateAlexandria, decorateBaikonur, decorateBletchley, decoratePadua, decorateWoolsthorpe } from './epochs.ts';
 
 export interface World {
-  /** focusX — где камера: за ней ходит солнце с тенями и объезжают задники; yaw — угол поворота камеры. */
-  update(t: number, dt: number, focusX?: number, yaw?: number): void;
+  /** focusX — где камера: за ней ходит солнце с тенями и объезжают задники; yaw — угол поворота камеры; players — где экипаж (птицы). */
+  update(t: number, dt: number, focusX?: number, yaw?: number, players?: { x: number; y: number; z: number }[]): void;
   setParts(parts: string[]): void;
   /** Спрятать уже собранные сферы (при входе на уровень). */
   hideCoins(ids: Iterable<string>): void;
@@ -87,6 +88,7 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
 
   const decor = (THEMES[level.id] ?? decorateHub)(g, scene);
   const obstacles = buildObstacles(g, level);
+  const birds = birdFlock(level);
 
   // Мигающие светодиоды пультов и анимированные объекты (батуты, вентиляторы, метки станций…).
   const leds: THREE.Mesh[] = [];
@@ -99,10 +101,11 @@ export function buildWorld(scene: THREE.Scene, level: Level): World {
   });
 
   return {
-    update(t, dt, focusX = 0, yaw = 0) {
+    update(t, dt, focusX = 0, yaw = 0, players = []) {
       decor.update?.(t, focusX, yaw);
       gate?.update(dt);
       obstacles.update(t, mechClock(), dt);
+      birds?.update(t, dt, players);
       // Солнце (и его тени) едет за камерой с шагом, чтобы тени не «дрожали».
       const fx = Math.round(focusX / 4) * 4;
       for (const f of followers) {

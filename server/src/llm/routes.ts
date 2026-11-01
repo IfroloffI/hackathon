@@ -25,7 +25,7 @@ const EVENT_TYPES: GameEventType[] = [
   'session.start', 'session.end', 'player.join', 'player.leave', 'level.enter', 'scenario.step', 'scenario.bonus',
   'role.take', 'role.leave', 'puzzle.action', 'puzzle.failed', 'puzzle.stage', 'puzzle.solved', 'part.awarded',
   'coin.pickup', 'fall', 'chat', 'agent.ask', 'agent.say', 'gate.answer', 'gate.open', 'hint', 'achievement', 'xp', 'like', 'emote', 'shop.buy',
-  'idle', 'finale',
+  'idle', 'finale', 'admin.settings', 'admin.command',
 ];
 
 /** Что видит/делает каждая роль — справка для промптов (данные партии — в снимке и событиях). */

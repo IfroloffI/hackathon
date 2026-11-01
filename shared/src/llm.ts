@@ -88,6 +88,8 @@ export interface SessionSnapshot {
     nextHintLevel: 1 | 2 | 3 | null;
   } | null;
   crew: CrewMemberSnapshot[];
+  /** Поведение агентов, заданное администратором комнаты (agentId → override). */
+  agents?: Record<string, { muted: boolean; behavior: string }>;
   /** Последний seq события этой сессии на момент снимка. */
   lastSeq: number;
 }

@@ -34,7 +34,9 @@ export type GameEventType =
   | 'emote'
   | 'shop.buy'
   | 'idle'
-  | 'finale';
+  | 'finale'
+  | 'admin.settings'
+  | 'admin.command';
 
 export interface EventActor {
   id: string;

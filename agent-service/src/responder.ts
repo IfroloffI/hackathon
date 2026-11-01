@@ -16,6 +16,12 @@ import { TaskQueue } from './queue.ts';
 const queue = new TaskQueue();
 const MARGIN_MS = 300;
 
+/** Указание ведущего (панель администратора) дописывается к персоне — меняет поведение агента в этой сессии. */
+export function withBehavior(agent: AgentProfile, behavior: string | undefined): AgentProfile {
+  const b = behavior?.trim();
+  return b ? { ...agent, persona: `${agent.persona}\nУказание ведущего игры (важнее черт персонажа): ${b}` } : agent;
+}
+
 export interface Agents {
   get(id: string): AgentProfile | undefined;
 }
@@ -122,6 +128,11 @@ interface SpeakPlan {
 
 function enqueue(e: GameEvent, priority: number, windowMs: number, plan: SpeakPlan) {
   const replyable = !!(e.data as Partial<ReplyableData>).replyable;
+  // Администратор комнаты заглушил агента — модель не тратим (сервер всё равно не пропустит реплику).
+  if (ctx(e.session).snapshot?.agents?.[plan.agent.id]?.muted) {
+    if (replyable) void release(e, plan);
+    return log(e, plan, 'fallback', { note: 'агент заглушён администратором' });
+  }
   if (!health.ok) {
     // Ollama лежит — сразу отказываемся (пустой финал), чтобы сервер не ждал свой таймер.
     if (replyable) void release(e, plan);
@@ -165,7 +176,7 @@ async function speak(e: GameEvent, plan: SpeakPlan, replyable: boolean) {
   const memory = plan.withMemory && plan.to ? await api.getMemory(plan.agent.id, plan.to) : null;
   const c = ctx(e.session);
   const messages = buildMessages({
-    agent: plan.agent,
+    agent: withBehavior(plan.agent, c.snapshot?.agents?.[plan.agent.id]?.behavior),
     situation: situation(c.snapshot),
     recent: c.recent,
     memory,
