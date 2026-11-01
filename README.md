@@ -11,6 +11,28 @@
 
 ## Запуск
 
+### Всё одной командой (Docker)
+
+```bash
+npm run up      # игра + LiveKit (голос) + Ollama + agent-service; = scripts/up.sh
+npm run down    # остановить
+docker compose logs -f game agent-service
+```
+
+`scripts/up.sh` берёт LAN-IP хоста для голоса (`LIVEKIT_NODE_IP`), при необходимости создаёт dev-сертификат в `livekit/certs` и выполняет `docker compose up -d --build`. Игра откроется на `https://localhost:2567`, с других ноутбуков — на `https://<ip-хоста>:2567`. Сертификат самоподписанный: в браузере один раз нажать «Перейти», для голоса то же сделать на `https://<ip-хоста>:7880`. БД и временные ряды хранятся в `./data`, как при `npm start`, поэтому одновременно с `npm start`/`npm run dev` стек не запустится: база и порт 2567 общие.
+
+Первый запуск нужен с интернетом: образы и модель (~2 ГБ), дальше работает офлайн. Порты: 2567 (игра), 7880 (wss LiveKit), 7881/tcp и 50000–50100/udp (медиа), 11434 (Ollama). Поиск публичных комнат по UDP-маякам из контейнера в LAN не работает — входите по коду. На Mac Ollama в Docker идёт без GPU; быстрее нативная: `OLLAMA_URL=http://host.docker.internal:11434 npm run up -- game livekit livekit-tls agent-service`.
+
+### Ветка frontend параллельно
+
+```bash
+npm run frontend   # = scripts/frontend.sh: копия ветки frontend в ../hackathon-frontend (git worktree), сборка, http://localhost:3567
+```
+
+У копии свои `node_modules` и `data/`, поэтому она не мешает этой ветке на :2567. Код для неё правится в `../hackathon-frontend` и коммитится там же, в ветку `frontend`. Порт меняется через `FRONTEND_PORT=4000 npm run frontend`.
+
+### Без Docker
+
 ```bash
 npm install
 
@@ -37,7 +59,7 @@ LLM_EXTERNAL=1 npm run llm-contract -w server   # контракт против 
 ### Живые реплики NPC (локальная LLM)
 
 ```bash
-docker compose up -d                         # Ollama + qwen2.5:3b + agent-service (первый раз — с интернетом, ~2 ГБ)
+npm run up                                   # весь стек, включая Ollama + qwen2.5:3b + agent-service (первый раз — с интернетом, ~2 ГБ)
 docker compose logs -f agent-service         # source=llm|fallback|timeout, ttft, total по каждой реплике
 docker compose stop ollama                   # игра продолжает работать на заготовках
 ```
