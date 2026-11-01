@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EPOCHS } from '@chronolet/shared';
 import { badgeTexture, circleShape, craft, cutout, glowing, mesh, roundRectShape, soft, stitchLine, stripeTexture } from '../craft.ts';
 import type { Decor } from './decor.ts';
+import { starSphere } from './common.ts';
 
 /** Цвета деталей в гнёздах двигателя — по порядку эпох. */
 const PART_COLORS: Record<string, number> = {
@@ -55,6 +56,64 @@ function spaceTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/**
+ * Торцы отсека: переборки поверх стен уровня (x=±15.6) с люком-«пуговицей» на внутренней стороне.
+ * Глубина до z=2.5 — дальше они загораживали бы игрока, когда камера разворачивается к краю.
+ */
+function ends(g: THREE.Group) {
+  for (const side of [-1, 1]) {
+    g.add(mesh(soft(2, 11.6, 7.6, 0.3), craft('card', HULL_DARK), side * 16.6, 4.3, -1.3));
+    const inner = side * 14.9;
+    const hatch = mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.16, 40), craft('felt', HULL), inner, 2.6, -1.4);
+    hatch.rotation.z = Math.PI / 2;
+    const rim = mesh(new THREE.TorusGeometry(1.35, 0.12, 12, 40), craft('felt', TRIM), inner, 2.6, -1.4);
+    rim.rotation.y = Math.PI / 2;
+    const wheel = mesh(new THREE.TorusGeometry(0.5, 0.07, 10, 28), craft('metal', 0xd8deea), inner - side * 0.1, 2.6, -1.4);
+    wheel.rotation.y = Math.PI / 2;
+    const lamp = mesh(new THREE.SphereGeometry(0.13, 12, 10), glowing(side < 0 ? 0xff5e5e : 0x7dff9a, 2), inner, 4.5, -1.4, false);
+    lamp.userData.blink = side < 0 ? 0 : 2;
+    g.add(hatch, rim, wheel, lamp);
+  }
+}
+
+/** Плюшевые планеты и астероиды вокруг корабля — видны сбоку и снизу, когда камера поворачивается. */
+function outerSpace(g: THREE.Group): (t: number) => void {
+  const far = { fog: false };
+  const spin: THREE.Object3D[] = [];
+  for (const [x, y, z, r, color, ring] of [
+    [-55, 14, -40, 7, 0xe8735a, 0xd9b26a],
+    [62, -6, -30, 5, 0x3b6fd8, 0],
+    [40, 26, -55, 3, 0x7dff9a, 0xfff4dc],
+    [-38, -18, 10, 4, 0xb48aff, 0],
+    [46, -20, 18, 2.5, 0xffd36b, 0],
+  ] as const) {
+    const pl = new THREE.Group();
+    pl.add(mesh(new THREE.SphereGeometry(r, 32, 24), craft('felt', color, far), 0, 0, 0, false));
+    if (ring) {
+      const rg = mesh(new THREE.TorusGeometry(r * 1.6, r * 0.12, 8, 48), craft('felt', ring, far), 0, 0, 0, false);
+      rg.rotation.x = Math.PI / 2.4;
+      pl.add(rg);
+    }
+    pl.position.set(x, y, z);
+    spin.push(pl);
+    g.add(pl);
+  }
+  const rocks: THREE.Mesh[] = [];
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2;
+    const rock = mesh(new THREE.DodecahedronGeometry(0.5 + (i % 4) * 0.35, 0), craft('card', 0x6a6f86, far), Math.cos(a) * (30 + (i % 3) * 8), -9 + Math.sin(i * 1.7) * 6, Math.sin(a) * 22 - 6, false);
+    rocks.push(rock);
+    g.add(rock);
+  }
+  return (t) => {
+    spin.forEach((p, i) => (p.rotation.y = t * (0.05 + i * 0.02)));
+    rocks.forEach((r, i) => {
+      r.rotation.set(t * 0.2 + i, t * 0.3, 0);
+      r.position.y += Math.sin(t * 0.5 + i) * 0.002;
+    });
+  };
+}
+
 function badge(text: string, w: number, color: string, x: number, y: number, z: number) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshStandardMaterial({ map: badgeTexture(text, color), transparent: true, roughness: 0.9 }));
   m.position.set(x, y, z);
@@ -88,9 +147,12 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
   g.add(aiLight);
 
   // Космос и стена с иллюминаторами (дыры в форме стены).
-  const space = new THREE.Mesh(new THREE.PlaneGeometry(70, 35), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
-  space.position.set(0, 5, -12);
+  // Картина космоса широкая: камера поворачивается по ходу движения, края не должны показываться.
+  const space = new THREE.Mesh(new THREE.PlaneGeometry(160, 80), new THREE.MeshBasicMaterial({ map: spaceTexture(), fog: false }));
+  space.position.set(0, 5, -24);
   g.add(space);
+  g.add(starSphere(1500, 110, 0xfff6dc, 0.45));
+  const planets = outerSpace(g);
   const wall = roundRectShape(-18, -1, 36, 11, 0.6);
   for (let x = -12; x <= 12; x += 6) wall.holes.push(circleShape(1.7, x, 4.6));
   g.add(cutout(wall, HULL, -4.9, 0.5, 'card'));
@@ -103,6 +165,7 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
     }
   }
   for (let x = -15; x <= 15; x += 6) g.add(mesh(soft(1, 10.6, 0.8, 0.3), craft('card', HULL_DARK), x, 4.3, -4.2));
+  ends(g);
   // Потолок и трубы в вязаной обмотке с хомутами.
   g.add(mesh(soft(36, 1.2, 6, 0.3), craft('card', HULL_DARK), 0, 9.8, -1.5));
   for (const [y, z, c] of [[8.7, -3.6, 0xc9a14a], [8.2, -3.4, 0xe8473b]] as const) {
@@ -193,6 +256,7 @@ export function decorateHub(g: THREE.Group, scene: THREE.Scene): Decor {
       orb.rotation.y = Math.sin(t * 0.8) * 0.4;
       pupil.position.x = 0.03 + Math.sin(t * 0.7) * 0.06;
       hanger.rotation.z = Math.sin(t * 1.3) * 0.08;
+      planets(t);
     },
     setParts(parts) {
       for (const s of sockets) {
