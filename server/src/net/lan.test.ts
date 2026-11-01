@@ -32,6 +32,21 @@ test('macOS раздаёт (Internet Sharing): bridge100 первый, его п
   ]);
 });
 
+test('ZeroTier на macOS: feth* (1.16+) приоритетнее en0, подсеть ZT в бродкасте', () => {
+  const snapshot = ifaces({
+    lo0: [{ address: '127.0.0.1', netmask: '255.0.0.0', internal: true }],
+    en0: [{ address: '172.16.210.85', netmask: '255.255.248.0' }],
+    feth2804: [{ address: '172.28.240.5', netmask: '255.255.255.0' }], // ZeroTier 1.16 на macOS
+    feth7804: [],                                                      // peer-сторона пары, без IP
+  });
+
+  assert.equal(primaryLanAddress(snapshot, 'darwin'), '172.28.240.5');
+  assert.deepEqual(subnetBroadcastAddresses(snapshot, 'darwin'), [
+    { address: '172.28.240.5', broadcast: '172.28.240.255' },
+    { address: '172.16.210.85', broadcast: '172.16.215.255' },
+  ]);
+});
+
 test('ZeroTier: zt0 приоритетнее en0 (веню-Wi-Fi для P2P бесполезен), подсеть ZT в бродкасте', () => {
   const snapshot = ifaces({
     lo0: [{ address: '127.0.0.1', netmask: '255.0.0.0', internal: true }],

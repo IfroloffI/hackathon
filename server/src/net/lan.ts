@@ -7,8 +7,8 @@ export type NetworkInterfaces = NodeJS.Dict<os.NetworkInterfaceInfo[]>;
 const VIRTUAL = /^(utun|tun|tap|docker|br-|veth|vboxnet|vmnet|bridge|llw|awdl)/;
 /** Физические LAN-интерфейсы. */
 const PHYSICAL = /^(en|eth|wlan|wl)/;
-/** ZeroTier (zt0, zt1…) — виртуальный L2-сегмент команды поверх интернета. */
-const ZEROTIER = /^zt/;
+/** ZeroTier: zt* (Linux/Windows), feth* (macOS, fake-ethernet пары) — виртуальный L2-сегмент команды. */
+const ZEROTIER = /^(zt|feth)/;
 
 /**
  * Ранг интерфейса: меньше — предпочтительнее.
