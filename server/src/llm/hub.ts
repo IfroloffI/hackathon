@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LLM_PROTOCOL, type GameEvent, type LlmAck, type LlmHintRequest, type LlmSayRequest, type LlmStreamMessage, type SessionSnapshot } from '@chronolet/shared';
+import { LLM_PROTOCOL, type GameEvent, type LlmAck, type LlmHintRequest, type LlmSayRequest, type LlmStreamMessage, type LlmVoiceRequest, type SessionSnapshot } from '@chronolet/shared';
 import { eventBus } from '../core/eventBus.ts';
 import { timeseries } from '../timeseries/store.ts';
 import { config } from '../config.ts';
@@ -21,6 +21,8 @@ export interface SessionControl {
   snapshot(): SessionSnapshot;
   say(req: LlmSayRequest): LlmAck;
   hint(req: LlmHintRequest): LlmAck;
+  /** Фраза из расшифровки голоса: ответ на вопрос у ворот. */
+  voice(req: LlmVoiceRequest): Promise<LlmAck>;
 }
 
 interface StreamClient {

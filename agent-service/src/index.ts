@@ -5,7 +5,7 @@ import { api } from './api.ts';
 import { ctx, remember } from './context.ts';
 import { checkModel, health, warmup } from './ollama.ts';
 import { systemPrompt } from './prompt.ts';
-import { maybeComment, onEvent } from './responder.ts';
+import { maybeComment, maybeShipHint, onEvent } from './responder.ts';
 import { seedSession, startTranscripts } from './transcripts.ts';
 
 /**
@@ -54,7 +54,9 @@ function connect() {
     const m = JSON.parse(String(raw)) as LlmStreamMessage;
     if (m.type === 'hello' && lastSeq === undefined) lastSeq = m.lastSeq;
     if (m.type === 'snapshot') {
-      ctx(m.snapshot.session).snapshot = m.snapshot;
+      const c = ctx(m.snapshot.session);
+      c.snapshot = m.snapshot;
+      c.snapshotAt = Date.now();
       void seedSession(m.snapshot.session);
     }
     if (m.type === 'event') {
@@ -78,4 +80,5 @@ setInterval(() => void watchOllama(), 10_000).unref();
 connect();
 // «Уши» NPC: расшифровки голоса из Redis и периодические комментарии к разговору экипажа.
 void startTranscripts();
-setInterval(() => maybeComment({ get: (id) => agents.get(id) }), 5000).unref();
+setInterval(() => maybeComment({ get: (id) => agents.get(id) }), 2000).unref();
+setInterval(() => maybeShipHint(), 5000).unref();

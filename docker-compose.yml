@@ -5,13 +5,17 @@
 #   npm run down      # остановить всё
 #   docker compose logs -f game agent-service
 #
-# Первый запуск — с интернетом: образы и модель (~2 ГБ). Дальше работает офлайн.
+# Первый запуск — с интернетом: образы и модель (~5 ГБ). Дальше работает офлайн.
 # Игра: https://<хост>:2567 (самоподписанный сертификат — браузер попросит подтвердить один раз).
 # Без LLM: docker compose stop ollama agent-service — игра продолжит на заготовках.
 # На Mac Docker не использует GPU (Metal): быстрее нативная Ollama (`ollama serve`) и
 #   OLLAMA_URL=http://host.docker.internal:11434 npm run up -- game livekit livekit-tls agent-service
 services:
+  # Ollama в Docker — запасной вариант (только CPU: на Mac 7b там ~0.5 ток/с, NPC не успевают).
+  # По умолчанию agent-service ходит в нативную Ollama на хосте (Metal, ~40 ток/с); scripts/up.sh
+  # включает этот профиль сам, если нативной нет: COMPOSE_PROFILES=docker-ollama.
   ollama:
+    profiles: ['docker-ollama']
     image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
     ports:
       - '11434:11434'
@@ -30,13 +34,14 @@ services:
 
   # Скачивает модель один раз; без интернета, если модель уже есть, просто завершается успешно.
   ollama-pull:
+    profiles: ['docker-ollama']
     image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
     depends_on:
       ollama:
         condition: service_healthy
     environment:
       OLLAMA_HOST: ollama:11434
-      MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     entrypoint: ['/bin/sh', '-c', 'ollama list | grep -q "^$$MODEL" || ollama pull "$$MODEL"']
     restart: 'no'
 
@@ -47,6 +52,7 @@ services:
     depends_on:
       ollama-pull:
         condition: service_completed_successfully
+        required: false
       redis:
         condition: service_healthy
     environment:
@@ -56,10 +62,10 @@ services:
       NODE_TLS_REJECT_UNAUTHORIZED: '0'
       # Расшифровки голоса — NPC комментируют, о чём говорит экипаж (COMMENT_GAP_MS — как часто).
       REDIS_URL: redis://redis:6379/0
-      COMMENT_GAP_MS: ${COMMENT_GAP_MS:-45000}
+      COMMENT_GAP_MS: ${COMMENT_GAP_MS:-10000}
       LLM_SERVICE_TOKEN: ${LLM_SERVICE_TOKEN:-dev-llm-token}
-      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     # Linux: host.docker.internal → хост (на Mac/Windows работает и так).
     extra_hosts:
       - 'host.docker.internal:host-gateway'

@@ -236,7 +236,7 @@ export function showHud(room: CrewRoom, opts: { onLeave: () => void; onTyping: (
       addLine(line, cls);
     }
     const sub = $('subtitle');
-    sub.replaceChildren(Object.assign(document.createElement('b'), { textContent: `${m.speaker}${m.source === 'llm' ? ' ✦' : ''}: ` }));
+    sub.replaceChildren(Object.assign(document.createElement('b'), { textContent: `${m.speaker}${m.source === 'llm' ? ' ✦' : ''}` }));
     const body = Object.assign(document.createElement('span'), { textContent: `${prefix}${m.text}` });
     if (m.partial) body.className = 'typing';
     sub.append(body);
